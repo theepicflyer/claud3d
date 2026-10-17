@@ -1,0 +1,126 @@
+{
+ "threads": [
+  {
+   "id": 1,
+   "status": "resolved",
+   "created": "2026-10-17 12:15:45",
+   "build": {
+    "commit": "d2f9d18",
+    "dirty": false,
+    "built_at": "2026-10-17 10:06:59"
+   },
+   "anchor": {
+    "kind": "circle",
+    "part": "lid",
+    "point": [
+     21.169,
+     -19.9,
+     4.284
+    ],
+    "normal": [
+     0,
+     -1,
+     0
+    ],
+    "frame": "part",
+    "view": "print",
+    "radius": 2.239,
+    "view_dir": [
+     -0.274,
+     -0.889,
+     0.368
+    ],
+    "parts": [
+     "lid"
+    ]
+   },
+   "camera": {
+    "position": [
+     172.50005884520908,
+     38.68548019419083,
+     33.020624317751675
+    ],
+    "target": [
+     190.4451461212847,
+     119.41783627974323,
+     -0.40494078570721925
+    ],
+    "layout": "print"
+   },
+   "screenshot": "shots/1.png",
+   "messages": [
+    {
+     "by": "user",
+     "text": "this is probably too tall.",
+     "at": "2026-10-17 12:15:45"
+    },
+    {
+     "by": "claude",
+     "text": "Cut the lip from 5 mm to 3 mm (lip_h). It still has the 0.4 mm lead-in and the snug 0.1 mm/side fit.",
+     "at": "2026-10-17 12:19:57"
+    }
+   ]
+  },
+  {
+   "id": 2,
+   "status": "resolved",
+   "created": "2026-10-17 12:15:45",
+   "build": {
+    "commit": "d2f9d18",
+    "dirty": false,
+    "built_at": "2026-10-17 10:06:59"
+   },
+   "anchor": {
+    "kind": "circle",
+    "part": "lid",
+    "point": [
+     32,
+     -0.121,
+     0.506
+    ],
+    "normal": [
+     1,
+     0,
+     0
+    ],
+    "frame": "part",
+    "view": "print",
+    "radius": 3.267,
+    "view_dir": [
+     0.906,
+     -0.031,
+     -0.421
+    ],
+    "parts": [
+     "lid"
+    ]
+   },
+   "camera": {
+    "position": [
+     346.61907108175745,
+     122.95615976249043,
+     -65.39500416300984
+    ],
+    "target": [
+     190.4451461212847,
+     119.41783627974323,
+     -0.40494078570721925
+    ],
+    "layout": "print"
+   },
+   "screenshot": "shots/2.png",
+   "messages": [
+    {
+     "by": "user",
+     "text": "this needs a scallop or some way for a user to actually open it.",
+     "at": "2026-10-17 12:15:45"
+    },
+    {
+     "by": "claude",
+     "text": "Added a finger scallop in the box's +X rim: 20 mm wide, 5 mm deep, 0.8 mm rounded edges (scallop_w / scallop_d). It exposes the lid's edge so you can lift it. I put it in the box rather than the lid so the lid still fits either way round. Say if you want one on both ends.",
+     "at": "2026-10-17 12:19:59"
+    }
+   ]
+  }
+ ]
+}
