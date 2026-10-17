@@ -40,6 +40,7 @@ PARAMS = dict(
     slot_tilt=3.0,     # slot back wall stands this much more upright than the item, so the item touches only its top
     front_clear=5.0,   # gap in front of the item at the slot floor; the front wall is vertical (R2)
     floor_r=4.0,       # inside corners of the slot floor (smaller where the item's corner is close)
+    rest_min=18.0,     # middle fingers are at least this wide at the top; matches the small board's rest
     # Rails
     rail_w=12.0, rail_h=12.0,
 )
@@ -133,20 +134,30 @@ def _solve_slot(p, k, back_y, r):
 
 def layout(p):
     """Slots back to front, each with the finger behind it. A finger's front edge is the slot's back wall; its back
-    edge is the previous slot's vertical front wall (or the panel's back end). Its cap is two corner radii of
-    almost half its top width, so it reads as one round end."""
+    edge is the previous slot's front wall (or the panel's back end). Its cap is two corner radii of almost half
+    its top width, so it reads as one round end. A front wall leans back just enough to keep the finger in front
+    of it at least rest_min wide at the top; otherwise it is vertical."""
     u, n = _uv(p)
     out = {}
     back_y = extent(p)[0]
+    prev = None
     for k in ITEMS:
-        r = 6.0
-        for _ in range(6):
-            sl = _solve_slot(p, k, back_y, r)
-            width = _wall_at(sl["P"], sl["w"], sl["H"])[0] - back_y
-            r = 0.49 * width
+        lean = 0.0
+        for _ in range(2):
+            r = 6.0
+            for _ in range(6):
+                sl = _solve_slot(p, k, back_y, r)
+                top_back = back_y - (sl["H"] - prev["C0"][1]) * math.tan(lean) if prev else back_y
+                width = _wall_at(sl["P"], sl["w"], sl["H"])[0] - top_back
+                r = 0.49 * width
+            if prev is None or width >= p.rest_min - 0.2:
+                break
+            lean = math.atan((p.rest_min - width) / (sl["H"] - prev["C0"][1]) + math.tan(lean))
+        if prev:
+            prev["front_lean"] = math.degrees(lean)
         sl["C0"] = slot_corners(p)[k] + (item_dims(p, k)[2] + p.front_clear) * n
-        sl["width"] = width
-        out[k] = sl
+        sl["width"], sl["top_back"], sl["front_lean"] = width, top_back, 0.0
+        out[k] = prev = sl
         back_y = sl["C0"][0]
     return out
 
@@ -169,8 +180,8 @@ def panel_profile(p):
         sl = lay[k]
         P, C0, H = sl["P"], sl["C0"], sl["H"]
         W = _wall_at(P, sl["w"], H)
-        pts += [tuple(C0), tuple(P), tuple(W), (sl["back_y"], H)]
-        corners += [(W, sl["r"]), ((sl["back_y"], H), sl["r"]),
+        pts += [tuple(C0), tuple(P), tuple(W), (sl["top_back"], H)]
+        corners += [(W, sl["r"]), ((sl["top_back"], H), sl["r"]),
                     (P, min(p.floor_r, 0.9 * sl["o"] / 1.05)), (C0, min(p.floor_r, 0.85 * p.front_clear))]
     face = Face(Wire.make_polygon([Vector(float(a), float(b)) for a, b in pts], close=True))
     for pt, r in corners:
@@ -205,9 +216,10 @@ def rail_ys(p):
     return [y0 + p.rail_w / 2 + 6, (lay["big"]["C0"][0] + lay["sheet"]["P"][0]) / 2, (lay["small"]["C0"][0] + y1) / 2]
 
 
-def item_solid(p, k):
+def item_solid(p, k, slot=None):
+    """Item k standing in its own slot, or in `slot` (the small board also fits the sheet's slot)."""
     w, h, t = item_dims(p, k)
-    B = slot_corners(p)[k]
+    B = slot_corners(p)[slot or k]
     u, n = _uv(p)
     x0 = p.big_right - w if k == "big" else p.x_center - w / 2
     # 0.05 mm off the floor and back wall so the interference check sees contact, not overlap
@@ -288,16 +300,15 @@ def check(p, s, parts):
     # R1: each item sits on both panels (contact, no overlap)
     left = stand & Box(p.x_center, 1000, 1000, align=(Align.MIN, Align.CENTER, Align.MIN))
     right = stand - left
-    for k in ITEMS:
-        it = asm[k]
+    cases = [(k, asm[k]) for k in ITEMS] + [("small (in sheet slot)", item_solid(p, "small", "sheet"))]
+    for k, it in cases:
         dl, dr = it.distance_to(left), it.distance_to(right)
         ov = _overlap(it, stand)
         yield dl < 0.2 and dr < 0.2 and ov < 1e-3, \
             f"R1 {k} rests on both panels (gaps {dl:.2f} / {dr:.2f} mm, overlap {ov:.3f} mm^3)"
 
     # R2: lifting each item straight up, or along its own lean, never hits the stand
-    for k in ITEMS:
-        it = asm[k]
+    for k, it in cases:
         worst = 0.0
         for d in (0.5, 1, 2, 3, 5, 8, 12, 20, 40, 80, 150):
             for vec in ((0, 0, d), tuple(d * u3)):

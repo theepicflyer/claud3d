@@ -6,7 +6,7 @@ A drying stand for the kitchen counter nook right of the sink. It holds two wood
 
 Counter frame used below: X runs along the back wall from the sink's right edge (x=0) to the side wall (x=300). Y runs out from where the back wall's curve meets the counter (y=0) toward the room. Z is up from the counter.
 
-- R1: Holds the big board, the small board and the baking sheet at the same time, each in its own slot. The sheet stands on its 280 mm edge.
+- R1: Holds the big board, the small board and the baking sheet at the same time, each in its own slot. The sheet stands on its 280 mm edge. The small board also fits the sheet's slot (user, 2026-10-17).
 - R2: Each item lifts straight up out of its slot without moving the stand or the other items. Measured as: no stand geometry above an item's slot within its lift path.
 - R3: The stand, the small board and the baking sheet project inside x 0–300, y 0–210. The big board does too, except for the part left of x=0, which stays within y 0–80 (over the strip behind the sink).
 - R4: Nothing touches the wall. Every part of the stand and every item stays at y ≥ 0.
@@ -33,7 +33,7 @@ Measured by the user with a tape measure (2026-10-17).
 - Supports: none. Nothing overhangs; the fingers lean at most 5°.
 - Slicer changes from defaults: plate type set to Textured PEI (PETG isn't allowed on the default Cool Plate).
 - After printing: stick silicone bumpers under both ends of each panel (four in all).
-- Slice: 4h 06m, 131 g.
+- Slice: 4h 07m, 132 g.
 
 ## Decisions
 
@@ -47,6 +47,7 @@ Measured by the user with a tape measure (2026-10-17).
 - Review #1 (2026-10-17): the first version (thin prongs, stepped ledges and lips, 45° ridge chamfers, arches under the base) looked medieval and faceted, and separately chamfered pieces met in mismatched junctions. The user asked for something curvier with a modern home look. Replaced with two side panels: a flat base strip with four leaning fingers whose heights follow one sweep from the tall back to the low front. Each finger has a round cap (both corners about half its top width), every inside corner is rounded, and every exposed edge has a 4.5 mm round. The profile is one 2D outline, filleted and then edge-rounded as a whole, so there are no seams between pieces.
 - Each item rests on the round cap of the finger behind it. The finger's front edge stands 3° more upright than the item, so the gap opens downward and only the cap touches. The model solves the slot position so the cap is tangent to the item's back face.
 - Slot front walls are vertical with 5 mm clearance at the floor. Lifting a leaning item straight up moves its front face forward by tan 8° per mm, so a front wall leaning with the item would catch it.
+- Review #2 (2026-10-17): the finger behind the sheet was 12 mm wide at the top, between the 33 mm back finger and the 17 mm one behind the small board, which read as thick-thin-thick. The user also wants to be able to put the small board in either middle slot. The front wall of the big board's slot now leans back about 3°, just enough to bring that finger to 18 mm, matching the small board's (`rest_min`). It stays upright enough for a straight lift: the board's front-bottom corner would only reach the wall about 99 mm up, above the top of the finger.
 - Feet are the user's stick-on silicone bumpers (2026-10-17). The underside is flat, and there are no printed feet or arches.
 - R6 mass assumptions: wood 0.75 g/cm³ (big board about 1.9 kg), baking sheet 1 kg, stand at 30% effective fill. Heavier infill in the base only improves it.
 
