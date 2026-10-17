@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
-from itertools import islice
 import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
 from functools import cache
+from itertools import islice
 from pathlib import Path
 
 FLATPAK_ID = "com.bambulab.BambuStudio"
