@@ -10,7 +10,7 @@ const fmt = (v) => '(' + v.map((x) => x.toFixed(1)).join(', ') + ')';
 
 const state = {
   project: null, view: null, builtAt: null, threads: [], version: null, connected: true,
-  layout: 'print', mode: 'orbit', showResolved: false,
+  layout: 'print', mode: 'pin', showResolved: false,
   parts: {},          // key -> {name, key, group, front, back, edges, color, frame, visible}
   drafts: [],         // {key, anchor, camera, text, screenshot}
   replies: {},        // thread id -> {text, status}
@@ -33,6 +33,9 @@ camera.position.set(250, -250, 200);
 scene.add(camera);
 const controls = new OrbitControls(camera, canvas);
 controls.screenSpacePanning = true;
+// Left button belongs to the comment tools. Right-drag pans; OrbitControls turns Ctrl+right-drag into rotate.
+// Shift+right-drag can't be used: Firefox-based browsers always open their context menu on Shift+right-click.
+controls.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
 scene.add(new THREE.HemisphereLight(0xffffff, 0x777777, 1.7));
 const headlight = new THREE.DirectionalLight(0xffffff, 1.5);
 headlight.position.set(0.4, 0.6, 1);
@@ -291,10 +294,26 @@ function partForAnchor(a) {
   return state.parts[a.frame === 'assembly' ? `${a.part}@assembly` : a.part];
 }
 
+// Unit sphere; markers rescale it every frame so dots stay the same size on screen at any zoom.
+const DOT = new THREE.SphereGeometry(1, 16, 12);
+const DOT_PX = 5;
+function scaleDots() {
+  const perPx = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / canvas.clientHeight;
+  const w = new THREE.Vector3();
+  scene.traverseVisible((o) => {
+    if (!o.userData.screenDot) return;
+    o.getWorldPosition(w);
+    const s = camera.position.distanceTo(w) * perPx * DOT_PX * o.userData.screenDot;
+    // Undo any scale inherited from the part's transform (rigid, so 1) and apply the screen size.
+    o.scale.setScalar(s);
+  });
+}
+
 function markerObject(a, color, scale) {
   const g = new THREE.Group();
   const matOpts = { color, depthTest: false, transparent: true, clippingPlanes: clipList() };
-  const dot = new THREE.Mesh(new THREE.SphereGeometry(scale * 0.006, 16, 12), new THREE.MeshBasicMaterial(matOpts));
+  const dot = new THREE.Mesh(DOT, new THREE.MeshBasicMaterial(matOpts));
+  dot.userData.screenDot = 1;
   dot.position.fromArray(a.point);
   dot.renderOrder = 10;
   g.add(dot);
@@ -339,7 +358,8 @@ function rebuildMarkers() {
     placeMeasure(measureAnchor(state.measure), `${state.measure.dist.toFixed(2)} mm`, 'measure');
   } else if (state.measure?.a) {
     const w = state.measure.a.world;
-    const dot = new THREE.Mesh(new THREE.SphereGeometry(scale * 0.005, 12, 8), new THREE.MeshBasicMaterial({ color: COLORS.measure, depthTest: false }));
+    const dot = new THREE.Mesh(DOT, new THREE.MeshBasicMaterial({ color: COLORS.measure, depthTest: false }));
+    dot.userData.screenDot = 0.8;
     dot.position.copy(w);
     dot.renderOrder = 10;
     measureGroup.add(dot);
@@ -384,24 +404,29 @@ function updateLabels() {
 }
 
 // ---------- interaction ----------
+let lasso = null;
 function setMode(mode) {
   state.mode = mode;
   stage.className = `mode-${mode}`;
   document.querySelectorAll('#modes button').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
-  controls.mouseButtons.LEFT = mode === 'circle' ? null : THREE.MOUSE.ROTATE;
-  if (mode !== 'measure' && state.measure) { state.measure = null; rebuildMarkers(); }
+  cancelGesture();
+}
+function cancelGesture() {
+  lasso = null;
+  octx.clearRect(0, 0, overlay.width, overlay.height);
+  if (state.measure) { state.measure = null; rebuildMarkers(); }
   setHint();
 }
+const NAV = 'Right-drag pan · Ctrl+right-drag or middle-drag rotate · wheel zoom';
 const HINTS = {
-  orbit: 'Left-drag rotate · right-drag pan · wheel zoom · P pin · C circle · M measure',
-  pin: 'Click the model to pin a comment. Drag still rotates.',
-  circle: 'Drag a loop around an area to comment on it. Right-drag pans, wheel zooms.',
-  measure: 'Click two points to measure between them.',
+  pin: `Click the model to pin a comment. ${NAV}`,
+  circle: `Drag a loop around an area to comment on it. ${NAV}`,
+  measure: `Click two points to measure between them. ${NAV}`,
 };
 function setHint(html) { $('hint').innerHTML = html ?? HINTS[state.mode]; $('hint').style.pointerEvents = html ? 'auto' : 'none'; }
 
 let down = null;
-let lasso = null;
+stage.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('pointerdown', (e) => {
   down = { x: e.clientX, y: e.clientY, button: e.button, moved: 0 };
   if (state.mode === 'circle' && e.button === 0) {
@@ -523,12 +548,10 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   const k = e.key.toLowerCase();
-  if (k === 'o') setMode('orbit');
-  else if (k === 'p') setMode('pin');
-  else if (k === 'c') setMode('circle');
-  else if (k === 'm') setMode('measure');
+  const tool = { 1: 'pin', 2: 'circle', 3: 'measure' }[k];
+  if (tool) setMode(tool);
   else if (k === 'f') setView('fit');
-  else if (k === 'escape') { lasso = null; octx.clearRect(0, 0, overlay.width, overlay.height); setMode('orbit'); }
+  else if (k === 'escape') cancelGesture();
 });
 document.querySelectorAll('#modes button').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
 document.querySelectorAll('#layouts button').forEach((b) => b.addEventListener('click', () => {
@@ -543,6 +566,7 @@ function snapshot(path, key) {
   // Show only this comment's marker, labelled "this", so the image can't be confused with thread numbers.
   const others = [];
   scene.traverse((o) => { if ((o.userData.marker || o.parent === measureGroup) && o.userData.key !== key && o.visible) { o.visible = false; others.push(o); } });
+  scaleDots();
   renderer.render(scene, camera);
   others.forEach((o) => { o.visible = true; });
   updateLabels();
@@ -757,8 +781,11 @@ async function doLoadState() {
     const hadModel = state.builtAt !== null;
     state.builtAt = s.view.built_at;
     await loadParts(s.view);
-    if (first || !hadModel) setView('iso');
-    else flash('Model rebuilt.');
+    if (first || !hadModel) {
+      if (!(first && restoreView())) setView('iso');
+    } else {
+      flash('Model rebuilt.');
+    }
   } else {
     rebuildMarkers();
   }
@@ -770,6 +797,8 @@ async function poll() {
   try {
     const j = await (await fetch('/api/version', { cache: 'no-store' })).json();
     if (state.project && j.project !== state.project) { location.reload(); return; }
+    if (state.app && j.app !== state.app) { reloadKeepingView(); return; }
+    state.app = j.app;
     if (!state.connected) { state.connected = true; state.sentAndClosed = false; $('banner').hidden = true; updateSend(); }
     if (j.version !== state.version) await loadState();
   } catch {
@@ -785,14 +814,29 @@ async function poll() {
 
 $('show-resolved').addEventListener('change', (e) => { state.showResolved = e.target.checked; rebuildMarkers(); renderComments(); });
 
+// The app's own code changed (e.g. Claude updated the viewer): reload, keeping the camera.
+function reloadKeepingView() {
+  try { sessionStorage.setItem('cad-review:camera', JSON.stringify(getCamera())); } catch { /* ignore */ }
+  location.reload();
+}
+function restoreView() {
+  try {
+    const c = JSON.parse(sessionStorage.getItem('cad-review:camera') || 'null');
+    sessionStorage.removeItem('cad-review:camera');
+    if (c) { goToCamera(c); return true; }
+  } catch { /* ignore */ }
+  return false;
+}
+
 function animate() {
   requestAnimationFrame(animate);
+  scaleDots();
   renderer.render(scene, camera);
   updateLabels();
 }
 
 resize();
-setMode('orbit');
+setMode('pin');
 loadState().then(() => {
   if (!state.view) showBanner('No build yet. Run `uv run cad build` for this project.');
 }).catch((e) => showBanner(`Failed to load: ${e}`));
