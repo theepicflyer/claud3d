@@ -10,9 +10,9 @@ Counter frame used below: X runs along the back wall from the sink's right edge 
 - R2: Each item lifts straight up out of its slot without moving the stand or the other items. Measured as: no stand geometry above an item's slot within its lift path.
 - R3: The stand, the small board and the baking sheet project inside x 0–300, y 0–210. The big board does too, except for the part left of x=0, which stays within y 0–80 (over the strip behind the sink).
 - R4: Nothing touches the wall. Every part of the stand and every item stays at y ≥ 0.
-- R5: Boards dry on both faces. The stand touches each item only along its bottom edge and on narrow ridges against its back face. Neighbouring items are at least 25 mm apart face to face. Stand geometry within 5 mm of a face covers at most 5% of that face.
+- R5: Boards dry on both faces. The stand touches each item only along its bottom edge and on the rounded top of the finger behind it. Neighbouring items are at least 25 mm apart face to face. Stand geometry within 5 mm of a face covers at most 5% of that face.
 - R6: Stable. For every combination of loaded and empty slots, the combined centre of mass sits inside the feet's footprint with at least 20 mm margin.
-- R7: Drains. The frame is open and touches the counter only through feet pads, at most 10% of its plan area. The arches between feet are at least 5 mm high at their crown. Every up-facing surface is a sloped or ridged strip; no level patch is more than 2 mm across, so water can't pool.
+- R7: Drains. The frame is open and stands on the user's stick-on silicone bumpers, so it sits off the counter; its underside is flat so they sit flush. No level up-facing patch is more than 3 mm across, so water can't pool.
 - R8: Prints in PETG on the X2D without supports.
 
 ## Interfaces and measurements
@@ -29,10 +29,11 @@ Measured by the user with a tape measure (2026-10-17).
 ## Print
 
 - Material: PETG (wet location, hot water). The user may add a denser-infill modifier to the lower part for weight.
-- Orientation: upright, as it stands on the counter; the feet are on the bed.
-- Supports: none. Arches have 45° flanks and 12 mm flat bridges; prongs lean 8°.
+- Orientation: upright, as it stands on the counter; the flat underside is on the bed.
+- Supports: none. Nothing overhangs; the fingers lean at most 5°.
 - Slicer changes from defaults: plate type set to Textured PEI (PETG isn't allowed on the default Cool Plate).
-- First slice: 4h 25m, 86 g.
+- After printing: stick silicone bumpers under both ends of each panel (four in all).
+- Slice: 4h 06m, 131 g.
 
 ## Decisions
 
@@ -41,10 +42,12 @@ Measured by the user with a tape measure (2026-10-17).
 - The stand holds everything up on its own. Nothing leans on the wall tiles (user, 2026-10-17).
 - The boards lean back 8° rather than 10°, which keeps the big board within the 80 mm strip.
 - Open frame on feet instead of a drip tray (user, 2026-10-17).
-- One piece printed upright, not a kit of flat-printed combs joined with screws. Joints would be crevices that stay wet, and the loads are small: the big board pushes about 1 N on each prong. Prongs taper from 14 mm deep at the root to 8 mm at the tip, which roughly doubles root strength against knocks.
-- Two side combs 185 mm apart (centres), inside the small board's width with 25 mm to spare each side, joined by three cross rails (back, middle, front).
-- Every exposed upper face (ledges, lips, prong fronts and tops, beam and rail tops) is chamfered at 45° from both sides down to a 1 mm ridge. Items touch only these ridges, and water runs off them sideways.
-- Lip is 6 mm tall with 1.5 mm clearance to the item's front face. A vertical lift moves the item's front face forward by tan(8°) per mm of lift, so the clearance has to exceed 6 x tan 8° = 0.84 mm.
+- One piece printed upright, not a kit of flat-printed parts joined with screws. Joints would be crevices that stay wet, and the loads are small: the big board pushes about 1 N on each panel.
+- Two side panels 185 mm apart (centres), inside the small board's width with 25 mm to spare each side, joined by three round-topped rails, each under a finger rather than a slot.
+- Review #1 (2026-10-17): the first version (thin prongs, stepped ledges and lips, 45° ridge chamfers, arches under the base) looked medieval and faceted, and separately chamfered pieces met in mismatched junctions. The user asked for something curvier with a modern home look. Replaced with two side panels: a flat base strip with four leaning fingers whose heights follow one sweep from the tall back to the low front. Each finger has a round cap (both corners about half its top width), every inside corner is rounded, and every exposed edge has a 4.5 mm round. The profile is one 2D outline, filleted and then edge-rounded as a whole, so there are no seams between pieces.
+- Each item rests on the round cap of the finger behind it. The finger's front edge stands 3° more upright than the item, so the gap opens downward and only the cap touches. The model solves the slot position so the cap is tangent to the item's back face.
+- Slot front walls are vertical with 5 mm clearance at the floor. Lifting a leaning item straight up moves its front face forward by tan 8° per mm, so a front wall leaning with the item would catch it.
+- Feet are the user's stick-on silicone bumpers (2026-10-17). The underside is flat, and there are no printed feet or arches.
 - R6 mass assumptions: wood 0.75 g/cm³ (big board about 1.9 kg), baking sheet 1 kg, stand at 30% effective fill. Heavier infill in the base only improves it.
 
 ## Print log

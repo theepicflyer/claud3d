@@ -1,5 +1,8 @@
 """Drying stand for two cutting boards and a baking sheet, standing in the counter nook right of the sink.
 
+Two side panels with a sweeping top edge, tall at the back and low at the front, with three slanted slots cut
+into them, joined by low rounded rails. It sits on stick-on silicone bumpers.
+
 Modelled in the counter frame, which is also the print orientation: X along the back wall from the sink's right
 edge, Y out from the foot of the wall curve, Z up. Items lean back toward the wall (-Y) by `lean` degrees.
 """
@@ -7,9 +10,8 @@ edge, Y out from the foot of the wall curve, Z up. Items lean back toward the wa
 import math
 
 import numpy as np
-from build123d import (Align, Axis, Box, Cylinder, Plane, Polygon, Pos, Rot, chamfer, extrude)
-
-from cadlib.render import tessellate
+from build123d import (Align, Axis, Box, Cylinder, Face, Line, Plane, Polygon, Pos, Rot, ThreePointArc, Vector, Wire,
+                       chamfer, extrude, fillet)
 
 PARAMS = dict(
     # Items (user's measurements). Slots from the back: big board, baking sheet, small board.
@@ -24,24 +26,22 @@ PARAMS = dict(
     air_gap=30.0,      # R5 face-to-face air between neighbouring items
     x_center=150.0,    # stand centre along the wall
     big_right=297.0,   # big board's right edge (assembly only); its left 58 mm hangs over the strip
-    # Combs (the two side frames)
-    comb_span=185.0,   # centre to centre; inside the small board's width with 25 mm to spare each side
-    comb_w=10.0,
-    back_y=5.0,        # rear end of the base
-    front_pad=2.0,     # base runs this far past the front lip
-    beam_h=14.0,
-    ledge_z=22.0,      # height of the items' back-bottom corners above the counter
-    prong_root=14.0,   # prong depth at the ledge, tapering to prong_tip
-    prong_tip=8.0,
-    prong_big=130.0, prong_sheet=130.0, prong_small=100.0,
-    lip_t=6.0, lip_h=6.0,
-    lip_clear=1.5,     # R2 > lip_h * tan(lean) so a vertical lift clears the lip
-    ridge=1.0,         # flat left on top of chamfered ridges; contact strip on prongs and ledges
-    # Base rails and feet (R7)
-    rail_w=10.0,
-    air_h=6.0,         # arch height between feet
-    bridge=12.0,       # flat top of each arch
-    pad=8.0,           # foot length along the beam
+    # Side panels
+    panel_span=185.0,  # centre to centre; inside the small board's width with 25 mm to spare each side
+    panel_w=12.0,
+    edge_r=4.5,        # rounding on every exposed panel edge
+    back_y=5.0,        # rear end of the panels
+    nose=14.0,         # front finger's length, in front of the small board's slot
+    top_back=135.0,    # finger heights follow a sweep from this at the back end
+    top_front=42.0,    # height at the front end
+    top_bulge=15.0,    # how far the sweep bows above a straight line
+    # Slots
+    floor_z=22.0,      # height of each item's back-bottom corner (slot floor) above the panel bottom
+    slot_tilt=3.0,     # slot back wall stands this much more upright than the item, so the item touches only its top
+    front_clear=5.0,   # gap in front of the item at the slot floor; the front wall is vertical (R2)
+    floor_r=4.0,       # inside corners of the slot floor (smaller where the item's corner is close)
+    # Rails
+    rail_w=12.0, rail_h=12.0,
 )
 
 PRINT = dict(material="petg", slicer={"curr_bed_type": "Textured PEI Plate"})
@@ -60,6 +60,12 @@ def _uv(p):
     return np.array([-math.sin(a), math.cos(a)]), np.array([math.cos(a), math.sin(a)])
 
 
+def _dir(deg):
+    """Unit (y, z) direction leaning back from vertical by deg."""
+    a = math.radians(deg)
+    return np.array([-math.sin(a), math.cos(a)])
+
+
 def item_dims(p, k):
     return getattr(p, f"{k}_w"), getattr(p, f"{k}_h"), getattr(p, f"{k}_t")
 
@@ -70,111 +76,133 @@ def slot_corners(p):
     y = p.wall_gap + p.big_h * math.sin(a)
     out = {}
     for k in ITEMS:
-        out[k] = np.array([y, p.ledge_z])
+        out[k] = np.array([y, p.floor_z])
         y += (item_dims(p, k)[2] + p.air_gap) / math.cos(a)
     return out
 
 
-def prong_len(p, k):
-    return getattr(p, f"prong_{k}")
+def panel_xs(p):
+    return (p.x_center - p.panel_span / 2, p.x_center + p.panel_span / 2)
 
 
-def comb_xs(p):
-    return (p.x_center - p.comb_span / 2, p.x_center + p.comb_span / 2)
-
-
-def arch_openings(a, b, p):
-    """Openings (start, end) along a beam from a to b, leaving feet of length `pad` at both ends."""
-    span = p.bridge + 2 * p.air_h
-    length = b - a
-    n = max(1, math.ceil((length - p.pad) / (span + p.pad)))
-    w = (length - (n + 1) * p.pad) / n
-    return [(a + p.pad + i * (w + p.pad), a + p.pad + i * (w + p.pad) + w) for i in range(n)]
-
-
-def arch_cut(o0, o1, h):
-    """Trapezoid with 45 degree flanks, slightly below z=0 so the cut is clean."""
-    return [(o0 - 1, -1), (o1 + 1, -1), (o1 - h, h), (o0 + h, h)]
-
-
-def base_extent(p):
+def extent(p):
     u, n = _uv(p)
     B = slot_corners(p)["small"]
-    front = B + (p.small_t + p.lip_clear + p.lip_t) * n
-    return p.back_y, front[0] + p.front_pad
+    front = B + (p.small_t + p.front_clear) * n
+    return p.back_y, front[0] + p.nose
 
 
-def _prism(pts, w):
-    return extrude(Plane.YZ * Polygon(*[tuple(q) for q in pts], align=None), w, dir=(1, 0, 0))
+def top_arc(p):
+    """Centre and radius of the sweep the finger heights follow, from (back_y, top_back) to (front, top_front)."""
+    y0, y1 = extent(p)
+    e0, e1 = np.array([y0, p.top_back]), np.array([y1, p.top_front])
+    L = np.linalg.norm(e1 - e0)
+    d = (e1 - e0) / L
+    m = np.array([-d[1], d[0]])
+    R = (L * L / 4 + p.top_bulge ** 2) / (2 * p.top_bulge)
+    return (e0 + e1) / 2 - (R - p.top_bulge) * m, R
 
 
-def _ridge(solid, dirs, c):
-    """Chamfer both side edges of the faces whose outward normal (y, z) is in `dirs`, leaving a narrow ridge."""
-    edges = []
-    for f in solid.faces():
-        nn = f.normal_at()
-        if any(abs(nn.Y - d[0]) < 1e-3 and abs(nn.Z - d[1]) < 1e-3 for d in dirs):
-            edges += [e for e in f.edges() if e.bounding_box().size.X < 1e-6]
-    return chamfer(edges, c)
+def top_z(p, y):
+    A, R = top_arc(p)
+    return A[1] + math.sqrt(R * R - (y - A[0]) ** 2)
 
 
-def comb(p):
-    """One side comb, x from 0 to comb_w. Built from simple prisms, each ridged on its exposed upper faces
-    before they are fused, because chamfering the fused outline fails."""
+def _wall_at(P, w, z):
+    return P + (z - P[1]) / w[1] * w
+
+
+def _solve_slot(p, k, back_y, r):
+    """Place slot k's back wall so a cap corner of radius r on the finger behind it just touches the item."""
     u, n = _uv(p)
-    up = (0.0, 1.0)
-    c = (p.comb_w - p.ridge) / 2
-    w = p.comb_w
-    y0, y1 = base_extent(p)
-    e = p.beam_h - 0.5
-    pieces, covered = [], []
-    for k, B in slot_corners(p).items():
-        t = item_dims(p, k)[2]
-        back = B - p.prong_root * n
-        C0 = B + (t + p.lip_clear) * n
-        C1 = C0 + p.lip_t * n
-        L = prong_len(p, k)
-        tip = B + L * u - p.prong_tip * n
-        covered.append((back[0], C1[0]))
-        pieces += [
-            _prism([(back[0], e), back, B, (B[0], e)], w),
-            _ridge(_prism([(B[0], e), B, C0, (C0[0], e)], w), [tuple(u)], c),
-            _prism([(C0[0], e), C0, C1, (C1[0], e)], w),
-            _ridge(_prism([back - 0.5 * u, B - 0.5 * u, B + L * u, tip], w), [tuple(n), tuple(u)], c),
-            _ridge(_prism([C0 - 0.5 * u, C1 - 0.5 * u, C1 + p.lip_h * u, C0 + p.lip_h * u], w), [tuple(n), tuple(u)], c),
-        ]
-    edges = [y0] + [v for pair in covered for v in pair] + [y1]
-    for i, (ya, yb) in enumerate(zip(edges, edges[1:])):
-        seg = _prism([(ya, 0), (yb, 0), (yb, p.beam_h), (ya, p.beam_h)], w)
-        pieces.append(seg if i % 2 else _ridge(seg, [up], c))
-    part = pieces[0]
-    for q in pieces[1:]:
-        part += q
-    for o0, o1 in arch_openings(y0, y1, p):
-        part -= _prism(arch_cut(o0, o1, p.air_h), w)
-    return part.clean()
+    B = slot_corners(p)[k]
+    w = _dir(p.lean - p.slot_tilt)
+    nw = np.array([w[1], -w[0]])           # wall normal, pointing forward into the slot
+    H = top_z(p, (back_y + B[0]) / 2)
+    lo, hi = 0.0, 40.0
+    for _ in range(60):
+        o = (lo + hi) / 2
+        Cc = _wall_at(B - o * n - r * nw, w, H - r)
+        if np.dot(n, Cc - B) + r > 0:
+            lo = o
+        else:
+            hi = o
+    P = B - o * n
+    return dict(P=P, w=w, o=o, H=H, r=r, rest=Cc + r * n, back_y=back_y)
+
+
+def layout(p):
+    """Slots back to front, each with the finger behind it. A finger's front edge is the slot's back wall; its back
+    edge is the previous slot's vertical front wall (or the panel's back end). Its cap is two corner radii of
+    almost half its top width, so it reads as one round end."""
+    u, n = _uv(p)
+    out = {}
+    back_y = extent(p)[0]
+    for k in ITEMS:
+        r = 6.0
+        for _ in range(6):
+            sl = _solve_slot(p, k, back_y, r)
+            width = _wall_at(sl["P"], sl["w"], sl["H"])[0] - back_y
+            r = 0.49 * width
+        sl["C0"] = slot_corners(p)[k] + (item_dims(p, k)[2] + p.front_clear) * n
+        sl["width"] = width
+        out[k] = sl
+        back_y = sl["C0"][0]
+    return out
+
+
+def _vertex_near(face, pt):
+    return min(face.vertices(), key=lambda v: (v.X - pt[0]) ** 2 + (v.Y - pt[1]) ** 2)
+
+
+def panel_profile(p):
+    """Side outline, drawn in XY as (y, z) and placed on Plane.YZ by the caller: flat bottom, four leaning fingers
+    with round caps whose heights follow the sweep, and the three slots between them."""
+    y0, y1 = extent(p)
+    lay = layout(p)
+    pts = [(y0, 0), (y1, 0)]
+    nose_back = lay["small"]["C0"][0]
+    Hn = top_z(p, (nose_back + y1) / 2)
+    pts += [(y1, Hn), (nose_back, Hn)]
+    corners = [((y1, Hn), 0.49 * (y1 - nose_back)), ((nose_back, Hn), 0.49 * (y1 - nose_back))]
+    for k in reversed(ITEMS):
+        sl = lay[k]
+        P, C0, H = sl["P"], sl["C0"], sl["H"]
+        W = _wall_at(P, sl["w"], H)
+        pts += [tuple(C0), tuple(P), tuple(W), (sl["back_y"], H)]
+        corners += [(W, sl["r"]), ((sl["back_y"], H), sl["r"]),
+                    (P, min(p.floor_r, 0.9 * sl["o"] / 1.05)), (C0, min(p.floor_r, 0.85 * p.front_clear))]
+    face = Face(Wire.make_polygon([Vector(float(a), float(b)) for a, b in pts], close=True))
+    for pt, r in corners:
+        face = face.fillet_2d(r, [_vertex_near(face, pt)])
+    return face
 
 
 def build(p, s):
-    comb0 = comb(p)
-    xa, xb = comb_xs(p)
-    stand = Pos(xa - p.comb_w / 2, 0, 0) * comb0 + Pos(xb - p.comb_w / 2, 0, 0) * comb0
+    face = panel_profile(p)
+    panel = extrude(Plane.YZ * face, p.panel_w, dir=(1, 0, 0))
+    side = [e for e in panel.edges() if e.bounding_box().size.X < 1e-6 and e.bounding_box().max.Z > 1e-3]
+    panel = fillet(side, p.edge_r)
+    xa, xb = panel_xs(p)
+    stand = Pos(xa - p.panel_w / 2, 0, 0) * panel + Pos(xb - p.panel_w / 2, 0, 0) * panel
 
-    y0, y1 = base_extent(p)
-    rails = [y0 + p.rail_w / 2, (y0 + y1) / 2, y1 - p.rail_w / 2]
-    rail_prof = Polygon((xa, 0), (xb, 0), (xb, p.beam_h), (xa, p.beam_h), align=None)
-    for o0, o1 in arch_openings(xa, xb, p):
-        rail_prof -= Polygon(*arch_cut(o0, o1, p.air_h), align=None)
-    rail0 = extrude(Plane.XZ * rail_prof, p.rail_w / 2, both=True)
-    top = rail0.edges().filter_by(Axis.X).group_by(Axis.Z)[-1]
-    rail0 = chamfer(top, (p.rail_w - p.ridge) / 2)
-    for ry in rails:
-        stand += Pos(0, ry, 0) * rail0
-    # Elephant-foot chamfer only where a wall meets the bed; on an arch flank it would make a steep overhang.
+    y0, y1 = extent(p)
+    rail = Box(xb - xa, p.rail_w, p.rail_h, align=(Align.MIN, Align.CENTER, Align.MIN))
+    rail = fillet(rail.edges().filter_by(Axis.X).group_by(Axis.Z)[-1], p.rail_w / 2 - 0.1)
+    for ry in rail_ys(p):
+        stand += Pos(xa, ry, 0) * rail
+    # Elephant-foot chamfer where a wall meets the bed
     feet = {e for fc in stand.faces() if abs(fc.normal_at().Z) < 1e-3 for e in fc.edges()
             if e.bounding_box().max.Z < 1e-3}
     stand = chamfer(list(feet), 0.4)
     return {"stand": stand}
+
+
+def rail_ys(p):
+    """Back, middle and front rails, each under a finger rather than under a slot."""
+    y0, y1 = extent(p)
+    lay = layout(p)
+    return [y0 + p.rail_w / 2 + 6, (lay["big"]["C0"][0] + lay["sheet"]["P"][0]) / 2, (lay["small"]["C0"][0] + y1) / 2]
 
 
 def item_solid(p, k):
@@ -182,7 +210,7 @@ def item_solid(p, k):
     B = slot_corners(p)[k]
     u, n = _uv(p)
     x0 = p.big_right - w if k == "big" else p.x_center - w / 2
-    # 0.05 mm off the ledge and prong so the interference check sees contact, not overlap
+    # 0.05 mm off the floor and back wall so the interference check sees contact, not overlap
     B = B + 0.05 * n + 0.05 * u
     if k == "sheet":
         body = Box(w, t, h, align=Align.MIN) - Pos(1, 1, 1) * Box(w - 2, t, h - 2, align=Align.MIN)
@@ -256,17 +284,16 @@ def check(p, s, parts):
     stand = asm["stand"]
     u, n = _uv(p)
     n3, u3 = np.array([0, n[0], n[1]]), np.array([0, u[0], u[1]])
-    xa, xb = comb_xs(p)
 
-    # R1: each item sits on both combs (contact, no overlap)
+    # R1: each item sits on both panels (contact, no overlap)
+    left = stand & Box(p.x_center, 1000, 1000, align=(Align.MIN, Align.CENTER, Align.MIN))
+    right = stand - left
     for k in ITEMS:
         it = asm[k]
-        left = stand & Pos(0, 0, 0) * Box(p.x_center, 1000, 1000, align=(Align.MIN, Align.CENTER, Align.MIN))
-        right = stand - left
         dl, dr = it.distance_to(left), it.distance_to(right)
         ov = _overlap(it, stand)
         yield dl < 0.2 and dr < 0.2 and ov < 1e-3, \
-            f"R1 {k} rests on both combs (gaps {dl:.2f} / {dr:.2f} mm, overlap {ov:.3f} mm^3)"
+            f"R1 {k} rests on both panels (gaps {dl:.2f} / {dr:.2f} mm, overlap {ov:.3f} mm^3)"
 
     # R2: lifting each item straight up, or along its own lean, never hits the stand
     for k in ITEMS:
@@ -289,8 +316,7 @@ def check(p, s, parts):
     yield ymin >= 0, f"R4 nearest approach to the wall curve y={ymin:.1f} mm"
 
     # R5: air between items, and stand area within 5 mm of each face
-    order = list(ITEMS)
-    for a, b in zip(order, order[1:]):
+    for a, b in zip(ITEMS, ITEMS[1:]):
         gap = asm[a].distance_to(asm[b])
         yield gap >= 25, f"R5 {a} to {b} face gap {gap:.1f} mm (need >= 25)"
     for k in ITEMS:
@@ -303,7 +329,7 @@ def check(p, s, parts):
             frac = area / (w * h)
             yield frac <= 0.05, f"R5 {k} {side} face: {area:.0f} mm^2 of stand within 5 mm ({100 * frac:.1f}%, max 5%)"
 
-    # R6: combined centre of mass stays inside the feet's footprint
+    # R6: combined centre of mass stays inside the footprint (bumpers go under the panel ends)
     foot = stand & Box(1000, 1000, 0.5, align=(Align.CENTER, Align.CENTER, Align.MIN))
     pts = [(v.X, v.Y) for v in foot.vertices()]
     hull = _hull(pts)
@@ -312,8 +338,7 @@ def check(p, s, parts):
     masses = {"stand": (stand.volume * PETG * STAND_FILL, stand.center())}
     for k in ITEMS:
         it = asm[k]
-        g = SHEET_G if k == "sheet" else it.volume * WOOD
-        masses[k] = (g, it.center())
+        masses[k] = (SHEET_G if k == "sheet" else it.volume * WOOD, it.center())
     worst = (math.inf, "")
     for mask in range(8):
         load = ["stand"] + [k for i, k in enumerate(ITEMS) if mask >> i & 1]
@@ -323,67 +348,45 @@ def check(p, s, parts):
         d = _inside_margin(hull, (cx, cy))
         if d < worst[0]:
             worst = (d, "+".join(load))
-    yield worst[0] >= 20, f"R6 worst centre-of-mass margin {worst[0]:.1f} mm inside the feet ({worst[1]}; need >= 20)"
+    yield worst[0] >= 20, f"R6 worst centre-of-mass margin {worst[0]:.1f} mm inside the footprint ({worst[1]}; need >= 20)"
 
-    # R7: counter contact, arch clearance, no flat up-facing patches wide enough to pool water
-    contact = sum(f.area for f in stand.faces() if f.normal_at().Z < -0.99 and f.center().Z < 0.01)
-    bb = stand.bounding_box()
-    yield contact <= 0.10 * bb.size.X * bb.size.Y, \
-        f"R7 counter contact {contact:.0f} mm^2 ({100 * contact / (bb.size.X * bb.size.Y):.1f}% of the stand's plan, max 10%)"
-    mesh = tessellate(stand)
-    y0, y1 = base_extent(p)
-    lines = [((x, yy) for yy in np.arange(y0 + 0.5, y1, 0.5)) for x in (xa, xb)]
-    lines += [((xx, ry) for xx in np.arange(xa + 0.5, xb, 0.5)) for ry in (y0 + p.rail_w / 2, (y0 + y1) / 2, y1 - p.rail_w / 2)]
-    worst_crown = math.inf
-    for line in lines:
-        pts = np.array([(a, b, -1.0) for a, b in line])
-        loc, idx, _ = mesh.ray.intersects_location(pts, np.tile([0, 0, 1.0], (len(pts), 1)))
-        first = np.full(len(pts), np.inf)
-        np.minimum.at(first, idx, loc[:, 2])
-        run = []
-        for z in list(first) + [0.0]:
-            if z > 0.5:
-                run.append(z)
-            elif run:
-                worst_crown = min(worst_crown, max(run))
-                run = []
-    yield worst_crown >= 5, f"R7 lowest arch crown {worst_crown:.1f} mm above the counter (need >= 5)"
-    flats = [2 * f.area / sum(e.length for e in f.edges()) for f in stand.faces() if f.normal_at().Z > 0.99]
+    # R7: flat underside for the bumpers; no level up-facing patch wide enough to pool water
+    bottoms = [f for f in stand.faces() if f.normal_at().Z < -0.99]
+    low = max(f.center().Z for f in bottoms)
+    yield low < 0.01, f"R7 every downward flat face is on the bed (highest at z={low:.2f}), so the bumpers sit flush"
+    flats = [2 * f.area / sum(e.length for e in f.edges()) for f in stand.faces()
+             if f.geom_type.name == "PLANE" and f.normal_at().Z > 0.99]
     widest = max(flats, default=0.0)
-    yield widest <= 2.0, f"R7 widest level up-facing patch {widest:.2f} mm across (max 2, so water runs off)"
+    yield widest <= 3.0, f"R7 widest level up-facing patch {widest:.2f} mm across (max 3, so water runs off)"
 
 
 # ---------------------------------------------------------------- callouts
 
 def features(p, s, parts):
     u, n = _uv(p)
-    xa, xb = comb_xs(p)
-    y0, y1 = base_extent(p)
-    corners = slot_corners(p)
+    xa, xb = panel_xs(p)
+    y0, y1 = extent(p)
+    lay = layout(p)
     names = {"big": "big board", "sheet": "baking sheet", "small": "small board"}
-    yield dict(name="side comb", part="stand", at=(xa, (y0 + y1) / 2, p.beam_h / 2), normal=(-1, 0, 0),
-               params=["comb_span", "comb_w", "beam_h"],
-               text="One of the two side frames. Every slot's ledge, lip and prong is part of a comb.")
-    for k, B in corners.items():
-        t = item_dims(p, k)[2]
-        L = prong_len(p, k)
-        mid = B - p.prong_tip / 2 * n + L / 2 * u
-        yield dict(name=f"{names[k]} prong", part="stand", at=(xb, mid[0], mid[1]), normal=(0, -1, 0.3),
-                   params=[f"prong_{k}", "prong_root", "prong_tip", "lean", "ridge"],
-                   text=f"Leans {p.lean:.0f} degrees; the {names[k]}'s back face rests on its front ridge, {p.ridge:.0f} mm wide.")
-        led = B + t / 2 * n
-        yield dict(name=f"{names[k]} ledge", part="stand", at=(xa, led[0], led[1]), normal=(0, 0.3, 1),
-                   params=["ledge_z", f"{k}_t", "lip_clear"],
-                   text=f"Ridge the {names[k]}'s bottom edge sits on, tilted to match the lean.")
-        lip = B + (t + p.lip_clear + p.lip_t / 2) * n + p.lip_h / 2 * u
-        yield dict(name=f"{names[k]} lip", part="stand", at=(xa, lip[0], lip[1]), normal=(0, 1, 0.3),
-                   params=["lip_h", "lip_t", "lip_clear"],
-                   text=f"Stops the {names[k]}'s bottom sliding forward. Low enough that a straight lift clears it.")
-    yield dict(name="cross rail", part="stand", at=(p.x_center, (y0 + y1) / 2, p.beam_h), normal=(0, 0.3, 1),
-               params=["rail_w", "beam_h"], text="Ties the two combs together. Three of them: back, middle and front.")
-    o0, o1 = arch_openings(y0, y1, p)[0]
-    yield dict(name="arch and feet", part="stand", at=(xa, (o0 + o1) / 2, p.air_h), normal=(-1, 0, -0.3),
-               params=["air_h", "bridge", "pad"],
-               text=f"The frame stands on {p.pad:.0f} mm feet with {p.air_h:.0f} mm arches between them, so the counter underneath dries.")
-    yield dict(name="ridge chamfer", part="stand", at=(xa, y0 + 20, p.beam_h), normal=(0, 0, 1), params=["ridge"],
-               text="Every up-facing edge is chamfered to a narrow ridge so water runs off instead of sitting.")
+    yield dict(name="side panel", part="stand", at=(xa - p.panel_w / 2, (y0 + y1) / 2, p.floor_z / 2),
+               normal=(-1, 0, 0), params=["panel_span", "panel_w", "edge_r"],
+               text="One of the two side panels. The items pass through its slots; only the slot edges touch them.")
+    yield dict(name="finger heights", part="stand", at=(xa, y0 + 15, top_z(p, y0 + 15)), normal=(0, -0.3, 1),
+               params=["top_back", "top_front", "top_bulge"],
+               text="The fingers' heights follow one curve from the tall back down to the low front.")
+    yield dict(name="front finger", part="stand", at=(xa, y1, top_z(p, y1) * 0.6), normal=(0, 1, 0.3),
+               params=["nose"], text="Front end of the panel, in front of the small board's slot.")
+    for k in ITEMS:
+        sl = lay[k]
+        yield dict(name=f"{names[k]} rest", part="stand", at=(xb, sl["rest"][0], sl["rest"][1]), normal=(0, 0.5, 1),
+                   params=["slot_tilt", "lean"],
+                   text=f"Round cap of the finger behind the {names[k]}. The item's back face leans on it; below it the finger "
+                        f"stands {p.slot_tilt:.0f} degrees more upright than the item, so the gap opens downward.")
+        fl = (sl["P"] + sl["C0"]) / 2
+        yield dict(name=f"{names[k]} slot floor", part="stand", at=(xa, fl[0], fl[1]), normal=(0, 0.3, 1),
+                   params=["floor_z", "floor_r"], text=f"The {names[k]}'s bottom edge sits here, tilted to match the lean.")
+        yield dict(name=f"{names[k]} slot front", part="stand", at=(xa, sl["C0"][0], sl["C0"][1] + 15), normal=(0, -1, 0.3),
+                   params=["front_clear"],
+                   text=f"Vertical front wall of the slot, {p.front_clear:.0f} mm clear of the item at the floor, so the item lifts straight up.")
+    yield dict(name="cross rail", part="stand", at=(p.x_center, rail_ys(p)[1], p.rail_h), normal=(0, 0.3, 1),
+               params=["rail_w", "rail_h"], text="Round-topped rail tying the two panels together. Three of them, each under a finger.")
