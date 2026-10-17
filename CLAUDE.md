@@ -1,0 +1,105 @@
+# claude-3d
+
+Code-driven CAD for FDM parts printed on a Bambu Lab X2D. Each part is a parametric build123d script; one command exports it, checks printability, renders views for review, and slices it with Bambu Studio.
+
+## Layout
+
+```
+printer.toml          printer, slicer presets, design limits, fit clearances, materials
+cadlib/               shared library + `cad` CLI
+  project.py          loads model.py, runs the build pipeline, writes the report
+  checks.py           mesh checks: manifold, build volume, bed contact, overhangs, ceilings, wall thickness, interference
+  render.py           offscreen PNG contact sheets (pyvista)
+  bambu.py            Bambu Studio preset flattening, CLI slicing, opening projects
+  features.py         FDM helpers: screw/nut tables, teardrop, nut trap, elephant-foot chamfer
+  template/           copied by `cad new`
+projects/<name>/
+  CLAUDE.md           that project's requirements, interfaces, print notes, decisions, print log
+  model.py            the parametric model
+  out/                generated (gitignored): STEP, STL, PNG renders, report.md/json, slice/<name>.gcode.3mf
+tests/                pytest for checks and the example build
+```
+
+## Commands
+
+```
+uv run cad new <name>                         scaffold projects/<name> (lowercase-kebab-case)
+uv run cad build <name> [-p key=value ...]    build + export + check + render + slice; exits 1 on FAIL
+    --no-slice --no-render --open
+uv run cad open <name> [--step]               open the sliced 3MF in Bambu Studio (or STEP in FreeCAD)
+uv run cad profiles machine|process|filament [regex]
+uv run cad list
+uv run pytest -q
+```
+
+## Workflow for a new part
+
+1. **Requirements first.** Before modeling, pin down: what the part does, what it mates with (get measured dimensions, ideally with calipers, and how they were measured), loads and environment (heat, outdoors/UV, flex, wear), material, quantity, cosmetic faces, and any size or print-time limits. Ask in small batches. Write them into the project CLAUDE.md as numbered requirements (R1, R2...) with measurable acceptance criteria. Call out ambiguity rather than guessing; when you must assume, record it under Decisions.
+2. **Scaffold:** `uv run cad new <name>`.
+3. **Choose print orientation before modeling.** It decides layer-line strength, which faces need support, and which faces are cosmetic. Model each part in its print orientation (flat face down at z=0). Use `assembly()` to place parts in their assembled positions.
+4. **Model** in `model.py`. Every dimension that comes from a requirement or a mating part goes in `PARAMS`. Clearances come from `s.clearance("press"|"snug"|"slide"|"loose")`, which already includes the material's extra, never from hardcoded numbers.
+5. **Write `check()`** to verify each requirement by measuring the built geometry (bounding boxes, sections, distances), not by echoing parameters.
+6. **Build and review:** `uv run cad build <name>`. Read `out/report.md`, then **look at every PNG** in `out/` with the Read tool. Check the renders against the requirements: proportions, features present and in the right place, nothing floating, section shows the intended walls. The checks catch geometry problems; only looking catches design mistakes.
+7. **Iterate** until the report is PASS or every remaining WARN is understood and recorded in the project's Decisions section (e.g. an intentional overhang that will get support).
+8. **Hand off:** walk the user through the renders, report, slice time/filament, and decisions. Offer `uv run cad open <name>` to inspect in Bambu Studio. Commit and open a PR (see Git).
+9. **After printing:** record results in the project's Print log. If fits are consistently tight or loose across projects, adjust `[fit]` or the material's `clearance_extra` in printer.toml rather than patching individual models.
+
+## model.py contract
+
+```python
+PARAMS = dict(...)                 # required; exposed as p.<name>; CLI overrides with -p
+PRINT = dict(material="pla")       # optional: material, process, filament, machine, slicer={...}, design={...}, fit={...}
+SECTIONS = {"part": ("y", 0.0)}    # optional: section plane per part or "assembly"; default is mid-Y
+def build(p, s) -> dict[str, Part] # required; print orientation; each part is dropped to z=0 automatically
+def assembly(p, s, parts) -> dict  # optional; assembled positions -> assembly.png + interference check
+def check(p, s, parts)             # optional; yield (ok: bool, "R1 message") per requirement
+```
+
+`s` is `cadlib.config.Settings`: `s.clearance(kind)`, `s.nozzle`, `s.layer_height`, `s.material.key`, `s.design[...]`, `s.build_volume`. All parts of a project are sliced together on one plate with the project's material.
+
+## Reading the report
+
+- **manifold** FAIL: the solid is broken; usually a bad boolean or a zero-thickness feature. Fix before anything else.
+- **bodies** WARN: several disconnected solids in one part. Fine for intentional multi-object plates, otherwise a feature didn't fuse (coincident faces; overlap booleans by 0.01 mm).
+- **overhangs** (red in renders): downward faces steeper than 45 deg from vertical. Fix by reorienting, chamfering instead of filleting, or 45 deg transitions. A 45 deg chamfer sits exactly at the limit and passes.
+- **bridges** (orange): flat downward faces. `bridge` = supported on opposite sides, warns past 15 mm. `cantilever` = shelf supported on one side, warns past 2 mm. `floating` = nothing below any edge, needs support.
+- **wall thickness** (magenta dots): ray-cast thickness. Expect hits at chamfer tips and sharp edges; judge from the location given. Below 1.2 mm warns, below 0.8 mm fails.
+- **interference**: overlap volume between assembled parts. Contact (gap 0.000) is normal for resting parts.
+- **slice**: Bambu Studio CLI result, time and grams. A slicer failure fails the build.
+
+## FDM design rules (0.4 mm nozzle, 0.2 mm layers)
+
+- Walls >= 1.2 mm (3 lines); structural walls 2+ mm. Floors/roofs >= 1.0 mm (5 layers). Prefer thicknesses that are multiples of ~0.42 mm.
+- Parts are weakest across layer lines (Z). Orient so the main bending/tension load runs along layers, not across them. Snap-fit arms and clips should flex in the XY plane.
+- Bed-facing edges: 0.4 mm chamfer against elephant foot (`F.elephant_foot_chamfer`). Downward-facing edges elsewhere: chamfer, don't fillet. Fillets are fine on vertical edges and upward-facing edges.
+- Horizontal holes: use `F.teardrop` (point up) or accept a slightly drooped top for holes under ~6 mm. Vertical holes print ~0.1-0.2 mm undersize; screw clearances in `F.SCREW_CLEARANCE` already account for that.
+- Fasteners: heat-set inserts (`bd_warehouse.fastener.InsertHole` / `HeatSetNut`, CNCKitchen sizes) for anything reassembled; nut traps (`F.hex_nut_trap`) or pilot holes for thread-forming screws (`F.PILOT_HOLE`) otherwise. Printed threads only at M8+ or coarse custom pitches (`bd_warehouse.thread.IsoThread`).
+- Clearances (diametral, PLA baseline, see printer.toml): press 0.10, snug 0.20, slide 0.30, loose 0.50. Print-in-place gaps >= 0.3 mm per side.
+- Text: emboss/engrave >= 0.6 mm deep, strokes >= 0.5 mm wide, font >= 6 mm tall; on vertical faces or the top face, not on the bed face unless mirrored deliberately.
+- Avoid large flat bottoms with sharp corners in ABS-GF (warping): round vertical corners, consider mouse ears.
+- Bridges up to ~15 mm are fine; longer ones sag. Break long ceilings with ribs or put them on the bed.
+- Build volume used by checks: 235 x 256 x 256 mm (both X2D nozzles reach it).
+
+## Materials on hand
+
+PLA (default), PETG, ABS-GF, TPU 95A (untested on this printer). Per-material slicer presets, extra clearance and notes are in printer.toml `[materials]`. Pick by function: PLA for indoor/prototype, PETG for toughness/heat to ~70 C/outdoors, ABS-GF for stiff hot parts (~95 C) and dimensional stability, TPU for flexible parts (walls >= 1.6 mm, no supports or long bridges).
+
+## build123d notes
+
+- Units are mm. Prefer algebra mode (`part = Box(...) - Pos(...) * Cylinder(...)`); builder mode is fine for sketch-heavy work.
+- `Plane.XZ` normal points -Y. When a direction matters, build `Plane(origin=..., z_dir=...)` explicitly.
+- Select edges/faces with `.edges().filter_by(Axis.Z)`, `.group_by(Axis.Z)[-1]`, `.sort_by(...)`, or `face.outer_wire().edges()`. Edges of rounded profiles are several line/arc segments.
+- Apply fillets and chamfers last; if one fails, reduce the size or select fewer edges.
+- bd_warehouse has fasteners, threads, bearings, gears, pipes; prefer it over hand-rolling catalog parts.
+
+## Environment
+
+- Python via uv only (`uv run ...`, `uv add ...`). Python is pinned to 3.13.
+- Bambu Studio is the flatpak `com.bambulab.BambuStudio`. The CLI needs flattened presets; `bambu.py` resolves `inherits` chains from the system profiles and the user's presets in `~/.var/app/com.bambulab.BambuStudio/config/BambuStudio/user/`. The default machine preset is the user's `My X2D 0.4 nozzle`.
+- The slicer logs a GLFW/OpenGL error when run headless; it only affects plate thumbnails.
+
+## Git
+
+- One repo for the whole folder, remote on GitHub. `out/` is gitignored; it is regenerated by `cad build`.
+- Work on a branch per project or tooling change, in a worktree under `.worktrees/` (gitignored); run `uv sync` in a new worktree. Open a PR when the build passes and the renders have been reviewed. Merge commits, no force pushes.
+- Keep this file, README.md and each project's CLAUDE.md current when behavior or decisions change.
