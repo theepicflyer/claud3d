@@ -101,7 +101,7 @@ Comments and screenshots are stored in `projects/<name>/review/` and are committ
 
 ### 7. Hand off
 
-Walk the user through the result: what changed, the report, slice time and filament, and any decision they haven't seen yet. `uv run cad open <name>` opens the sliced project in Bambu Studio (`--step` opens the STEP files in FreeCAD). Commit, open a PR and merge (see Git).
+Walk the user through the result: what changed, the report, slice time and filament, and any decision they haven't seen yet. `uv run cad open <name>` opens the sliced project in Bambu Studio (`--step` opens the STEP files in FreeCAD); the review app's "Open in Bambu Studio" button (B) does the same. Commit, open a PR and merge (see Git).
 
 ### 8. After printing
 
@@ -143,6 +143,7 @@ uv run pytest -q
 
 - **Navigation is on the right mouse button:** drag pans, Ctrl+drag or middle-drag rotates, the wheel zooms. Shift+right-drag can't be used: Firefox-based browsers (Zen is installed here) always open their context menu on Shift+right-click.
 - **The left button runs the current tool:** 1 pin, 2 circle, 3 measure. Esc cancels.
+- **Open in Bambu Studio** (under the build info, or B) opens the latest sliced project, like `cad open`.
 - **Measure:**
   - Snaps to exact B-rep vertices, circle centers, edge midpoints and edges. Ctrl+click places a point freely.
   - Shows distance, colour-coded ΔX/ΔY/ΔZ legs, "along X/Y/Z" when the distance is axis-aligned, face-to-face distance for parallel flat faces, and diameters.

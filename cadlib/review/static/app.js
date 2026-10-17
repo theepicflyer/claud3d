@@ -836,6 +836,7 @@ window.addEventListener('keydown', (e) => {
   const tool = { 1: 'pin', 2: 'circle', 3: 'measure' }[k];
   if (tool) setMode(tool);
   else if (k === 'f') setView('fit');
+  else if (k === 'b') openStudio();
   else if (k === 'arrowright' && state.tour !== null) tourStep(1);
   else if (k === 'arrowleft' && state.tour !== null) tourStep(-1);
   else if (k === 'escape') { if (state.tour !== null) endTour(); else cancelGesture(); }
@@ -1074,6 +1075,16 @@ function showBanner(text, autoHide) {
   if (autoHide) bannerTimer = setTimeout(() => { b.hidden = true; }, 3500);
 }
 const flash = (text) => showBanner(text, true);
+
+async function openStudio() {
+  try {
+    const res = await (await fetch('/api/open-studio', { method: 'POST' })).json();
+    flash(res.ok ? 'Opening the sliced project in Bambu Studio…' : res.error);
+  } catch {
+    flash('Review server is not running.');
+  }
+}
+$('open-studio').addEventListener('click', openStudio);
 
 let loading = null;
 function loadState() {

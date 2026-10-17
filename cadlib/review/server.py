@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
+from .. import bambu
 from . import apply_submission, format_threads, load_threads, review_dir
 
 STATIC = Path(__file__).parent / "static"
@@ -101,7 +102,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         self.server.last_request = time.time()
-        if urlparse(self.path).path != "/api/send":
+        path = urlparse(self.path).path
+        if path == "/api/open-studio":
+            self._open_studio()
+            return
+        if path != "/api/send":
             self._send(404, b"not found", "text/plain")
             return
         payload = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
@@ -118,6 +123,19 @@ class Handler(BaseHTTPRequestHandler):
         print(summary or "(nothing new)", flush=True)
         if not self.server.keep_running:
             threading.Thread(target=self.server.shutdown, daemon=True).start()
+
+
+    def _open_studio(self) -> None:
+        target = bambu.project_3mf(self.server.project)
+        if not target.exists():
+            self._json({"ok": False, "error": "No sliced project yet. Run `uv run cad build` first."}, 404)
+            return
+        try:
+            bambu.open_in_studio(target)
+        except RuntimeError as e:
+            self._json({"ok": False, "error": str(e)}, 500)
+            return
+        self._json({"ok": True})
 
 
 def serve(project: Path, port: int | None = None, open_browser: bool = True, keep_running: bool = False) -> None:
