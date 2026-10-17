@@ -1,5 +1,6 @@
-import pytest
+import json
 
+import pytest
 from build123d import Box
 
 from cadlib import bambu
@@ -20,6 +21,10 @@ def test_example_box_builds(do_slice):
     assert all(f.exists() for f in res.files + res.images)
     if do_slice:
         assert res.slice.ok and res.slice.print_time_s > 0
+    view = json.loads((res.project / "out" / "view.json").read_text())
+    assert set(view["parts"]) == {"box", "lid"}
+    lid = view["assembly"]["lid"]["matrix"]
+    assert lid[2][2] == pytest.approx(-1) and lid[2][3] == pytest.approx(34)  # flipped onto the box
 
 
 def test_plate_layout_uses_shared_region_when_possible():

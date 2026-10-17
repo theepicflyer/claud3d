@@ -1,4 +1,4 @@
-"""`cad` command line: new, build, open, profiles, list."""
+"""`cad` command line: new, build, open, review, comments, reply, profiles, list."""
 
 from __future__ import annotations
 
@@ -61,6 +61,37 @@ def cmd_open(a) -> int:
     return 0
 
 
+def cmd_review(a) -> int:
+    from .review.server import serve
+    project = resolve_project(a.project)
+    if not (project / "out" / "view.json").exists():
+        print("no build yet; run `uv run cad build` first", file=sys.stderr)
+        return 1
+    try:
+        serve(project, a.port, open_browser=not a.no_open, keep_running=a.keep)
+    except OSError as e:
+        print(f"could not start the review server: {e}. Is another review of this project still running?",
+              file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_comments(a) -> int:
+    from .review import format_threads, load_threads
+    project = resolve_project(a.project)
+    threads = [t for t in load_threads(project) if a.all or t["status"] == "open"]
+    print(format_threads(project, threads) if threads else "no open comments")
+    return 0
+
+
+def cmd_reply(a) -> int:
+    from .review import add_reply, format_thread
+    project = resolve_project(a.project)
+    status = "resolved" if a.resolve else "open" if a.reopen else None
+    print(format_thread(project, add_reply(project, a.id, a.text, status)))
+    return 0
+
+
 def cmd_profiles(a) -> int:
     for n in bambu.list_profiles(a.kind, a.pattern or ""):
         print(n)
@@ -96,6 +127,27 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("project")
     s.add_argument("--step", action="store_true", help="open STEP files in FreeCAD instead")
     s.set_defaults(fn=cmd_open)
+
+    s = sub.add_parser("review", help="open the 3D review app; exits with the comments when you press Send")
+    s.add_argument("project")
+    s.add_argument("--port", type=int, help="default is stable per project")
+    s.add_argument("--no-open", action="store_true", help="don't launch a browser")
+    s.add_argument("--keep", action="store_true", help="keep serving after comments are sent")
+    s.set_defaults(fn=cmd_review)
+
+    s = sub.add_parser("comments", help="print review threads (open ones by default)")
+    s.add_argument("project")
+    s.add_argument("--all", action="store_true")
+    s.set_defaults(fn=cmd_comments)
+
+    s = sub.add_parser("reply", help="reply to a review thread as Claude")
+    s.add_argument("project")
+    s.add_argument("id", type=int)
+    s.add_argument("text")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--resolve", action="store_true")
+    g.add_argument("--reopen", action="store_true")
+    s.set_defaults(fn=cmd_reply)
 
     s = sub.add_parser("profiles", help="list Bambu Studio presets")
     s.add_argument("kind", choices=bambu.KINDS)

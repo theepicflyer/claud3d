@@ -4,3 +4,4 @@ __pycache__/
 .worktrees/
 .tmp-test/
 projects/*/out/
+.playwright-mcp/

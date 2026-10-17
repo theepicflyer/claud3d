@@ -5,12 +5,14 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
+import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
+import numpy as np
 from build123d import Pos, Shape, export_step
 
 from . import bambu, checks, render
@@ -118,6 +120,7 @@ def run_build(project: Path, overrides: dict | None = None, do_render: bool = Tr
                                     rep.thin_points, sections.get(name), hdr)
             res.images.append(img)
 
+    asm = {}
     if hasattr(mod, "assembly"):
         asm = _as_dict(mod.assembly(p, s, parts))
         res.assembly_findings = checks.check_interference(asm)
@@ -146,8 +149,71 @@ def run_build(project: Path, overrides: dict | None = None, do_render: bool = Tr
                 res.files.append(res.slice.project_3mf)
 
     write_report(res, p, s)
+    write_view(res, s, meshes, asm)
     log(f"done in {time.time() - t0:.1f}s")
     return res
+
+
+def _rigid_transform(src: np.ndarray, dst: np.ndarray) -> np.ndarray | None:
+    """4x4 matrix mapping src points onto dst (same order), or None if they aren't a rigid motion of each other."""
+    if src.shape != dst.shape or len(src) < 3:
+        return None
+    cs, cd = src.mean(axis=0), dst.mean(axis=0)
+    u, _, vt = np.linalg.svd((src - cs).T @ (dst - cd))
+    d = np.sign(np.linalg.det(vt.T @ u.T))
+    rot = vt.T @ np.diag([1, 1, d]) @ u.T
+    m = np.eye(4)
+    m[:3, :3], m[:3, 3] = rot, cd - rot @ cs
+    err = np.abs(src @ rot.T + m[:3, 3] - dst).max()
+    return m if err < 1e-3 else None
+
+
+def _git_info(project: Path) -> dict:
+    def git(*args):
+        r = subprocess.run(["git", *args], cwd=project, capture_output=True, text=True)
+        return r.stdout.strip() if r.returncode == 0 else ""
+    return {"commit": git("rev-parse", "--short", "HEAD"), "dirty": bool(git("status", "--porcelain"))}
+
+
+def write_view(res: BuildResult, s: Settings, meshes: dict, asm: dict) -> Path:
+    """Describe the build for the review app: part STLs, plate offsets, assembly transforms, report summary."""
+    out = res.project / "out"
+    placed = place_on_plate(meshes, s) or {}
+    parts, x = {}, 0.0
+    for name, m in meshes.items():
+        if name in placed:
+            offset = (placed[name].bounds[0] - m.bounds[0]).tolist()
+        else:
+            offset = [x - m.bounds[0][0], 0.0, 0.0]
+            x += m.extents[0] + 10
+        parts[name] = {"stl": f"{name}.stl", "plate_offset": offset, "bbox": m.extents.round(2).tolist()}
+    assembly = {}
+    asm_dir = out / "assembly"
+    for name, shape in asm.items():
+        am = render.tessellate(shape)
+        mat = _rigid_transform(meshes[name].vertices, am.vertices) if name in meshes else None
+        if mat is not None:
+            assembly[name] = {"part": name, "matrix": mat.round(9).tolist()}
+        else:
+            asm_dir.mkdir(exist_ok=True)
+            am.export(asm_dir / f"{name}.stl")
+            assembly[name] = {"stl": f"assembly/{name}.stl"}
+    rep = {r.name: {"status": r.status, "findings": [vars(f) for f in r.findings if f.status != checks.PASS]}
+           for r in res.reports}
+    view = {
+        "project": res.project.name,
+        "built_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        **_git_info(res.project),
+        "status": res.status,
+        "parts": parts,
+        "assembly": assembly,
+        "plate": {"nozzles": [{"name": z.name, "x": z.x, "y": z.y, "height": z.height} for z in s.nozzles]},
+        "report": rep,
+        "spec": [vars(f) for f in res.spec_findings],
+    }
+    path = out / "view.json"
+    path.write_text(json.dumps(view, indent=1))
+    return path
 
 
 def place_on_plate(meshes: dict, s: Settings, gap: float = 5.0) -> dict | None:

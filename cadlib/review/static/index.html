@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CAD Review</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 1l6 3.5v7L8 15l-6-3.5v-7z' fill='%23d9731a'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css">
+<script type="importmap">
+{ "imports": { "three": "/static/vendor/three.module.js" } }
+</script>
+</head>
+<body>
+<div id="app">
+  <main id="stage">
+    <div id="toolbar">
+      <div class="group" id="modes">
+        <button data-mode="orbit" class="on" title="Navigate (O). Left-drag rotate, right-drag pan, wheel zoom">Navigate</button>
+        <button data-mode="pin" title="Pin a comment to a point (P)">Pin</button>
+        <button data-mode="circle" title="Circle an area and comment on it (C)">Circle</button>
+        <button data-mode="measure" title="Measure between two points (M)">Measure</button>
+      </div>
+      <div class="group" id="layouts">
+        <button data-layout="print" class="on" title="Parts as laid out on the build plate">Plate</button>
+        <button data-layout="assembly" title="Parts in assembled positions">Assembly</button>
+      </div>
+      <div class="group" id="cams">
+        <button data-cam="iso">Iso</button>
+        <button data-cam="front">Front</button>
+        <button data-cam="right">Right</button>
+        <button data-cam="top">Top</button>
+        <button data-cam="fit" title="Fit view (F)">Fit</button>
+      </div>
+      <div class="group" id="section">
+        <label>Section
+          <select id="sec-axis">
+            <option value="">off</option><option value="x">X</option><option value="y">Y</option><option value="z">Z</option>
+          </select>
+        </label>
+        <input id="sec-pos" type="range" min="0" max="1000" value="500" disabled>
+        <button id="sec-flip" title="Flip which side is kept" disabled>Flip</button>
+      </div>
+    </div>
+    <canvas id="gl"></canvas>
+    <canvas id="overlay"></canvas>
+    <div id="labels"></div>
+    <div id="banner" hidden></div>
+    <div id="hint"></div>
+    <div id="status"><span id="hover"></span></div>
+  </main>
+  <aside id="side">
+    <header>
+      <div class="title"><span id="project"></span><span id="badge" class="badge"></span></div>
+      <div id="buildinfo" class="muted"></div>
+    </header>
+    <section>
+      <h2>Parts</h2>
+      <ul id="parts"></ul>
+    </section>
+    <section id="report-sec">
+      <h2>Report</h2>
+      <ul id="report"></ul>
+    </section>
+    <section id="comments-sec">
+      <h2>Comments
+        <label class="muted small"><input type="checkbox" id="show-resolved"> show resolved</label>
+      </h2>
+      <button id="add-general" class="link">+ General comment on this view</button>
+      <div id="drafts"></div>
+      <div id="threads"></div>
+    </section>
+    <footer>
+      <button id="send" disabled>Send to Claude</button>
+      <div class="muted small" id="send-note"></div>
+    </footer>
+  </aside>
+</div>
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>
