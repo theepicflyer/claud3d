@@ -52,7 +52,7 @@ def cmd_open(a) -> int:
         subprocess.Popen(["freecad", *map(str, steps)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                          start_new_session=True)
         return 0
-    target = out / "slice" / f"{project.name}.gcode.3mf"
+    target = bambu.project_3mf(project)
     if not target.exists():
         print("no sliced project yet; run `uv run cad build` first", file=sys.stderr)
         return 1

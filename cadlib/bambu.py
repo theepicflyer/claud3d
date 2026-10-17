@@ -197,6 +197,11 @@ def slice_files(
     return res
 
 
+def project_3mf(project: Path) -> Path:
+    """Where `cad build` writes a project's sliced Bambu Studio project."""
+    return project / "out" / "slice" / f"{project.name}.gcode.3mf"
+
+
 def open_in_studio(path: Path) -> None:
     cmd = bambu_command()
     if not cmd:

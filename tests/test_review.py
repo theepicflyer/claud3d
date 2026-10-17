@@ -81,3 +81,24 @@ def test_feature_normalization():
     assert f["point"] == [0, 0, 5] and f["normal"] == [0, 0, 1] and f["params"] == {"a": 3}
     with pytest.raises(KeyError):
         _feature(dict(name="x", part="nope", at=(0, 0, 0)), {"p": part}, SimpleNamespace())
+
+
+def test_open_studio_endpoint(project, monkeypatch):
+    from cadlib import bambu
+
+    opened = []
+    monkeypatch.setattr(bambu, "open_in_studio", opened.append)
+    srv = ReviewServer(project, 0, keep_running=True)
+    th = threading.Thread(target=srv.serve_forever, daemon=True)
+    th.start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/api/open-studio"
+    with pytest.raises(urllib.error.HTTPError) as err:
+        urllib.request.urlopen(urllib.request.Request(url, b"", method="POST"))
+    assert err.value.code == 404 and "cad build" in json.loads(err.value.read())["error"]
+    target = bambu.project_3mf(project)
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"3mf")
+    assert json.loads(urllib.request.urlopen(urllib.request.Request(url, b"", method="POST")).read())["ok"]
+    assert opened == [target]
+    srv.shutdown()
+    srv.server_close()

@@ -143,7 +143,7 @@ def run_build(project: Path, overrides: dict | None = None, do_render: bool = Tr
             for name, m in placed.items():
                 plate_stls.append(plate_dir / f"{name}.stl")
                 m.export(plate_stls[-1])
-            res.slice = bambu.slice_files(plate_stls, out / "slice" / f"{project.name}.gcode.3mf", s.machine_profile,
+            res.slice = bambu.slice_files(plate_stls, bambu.project_3mf(project), s.machine_profile,
                                           s.process_profile, s.material.filament_profile, out / "slice" / "profiles",
                                           overrides=s.slicer_overrides)
             if res.slice.project_3mf:
