@@ -27,7 +27,7 @@ A build writes these files to `out/`:
 - `<part>.step` and `<part>.stl` for each part
 - `<part>.png`: iso, below, front, right and top views, plus a cross-section. Overhangs are red, flat ceilings orange and thin walls magenta.
 - `assembly.png`, when the model defines an assembly
-- `report.md` / `report.json`: printability checks (manifold, fits the build volume, bed contact, overhangs, bridges, wall thickness, interference) and the project's own requirement checks
+- `report.md` / `report.json`: printability checks (manifold, which X2D nozzles can reach the part, bed contact, overhangs, bridges, wall thickness, interference) and the project's own requirement checks
 - `slice/<project>.gcode.3mf`: sliced with the X2D, process and filament presets, ready to open or send to the printer
 
-Printer, presets, design limits, fit clearances and materials are in `printer.toml`. Each project's requirements, decisions and print log live in its own `CLAUDE.md`. The root `CLAUDE.md` describes the workflow Claude follows.
+Printer, presets, design limits, fit clearances and materials are in `printer.toml`. Per-nozzle print regions come from the Bambu machine preset. On the X2D, the left (main, direct-drive) nozzle covers 256 x 256 x 261 mm. The right (auxiliary, Bowden) nozzle covers 235.5 x 256 x 256 mm, because it can't reach the leftmost 20.5 mm of the bed or the top 5 mm. Each project's requirements, decisions and print log live in its own `CLAUDE.md`. The root `CLAUDE.md` describes the workflow Claude follows.

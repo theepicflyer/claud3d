@@ -8,6 +8,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass, field
 from functools import cache
+from itertools import islice
 from pathlib import Path
 
 FLATPAK_ID = "com.bambulab.BambuStudio"
@@ -110,6 +111,7 @@ class SliceResult:
     print_time_s: float | None = None
     filament_g: float | None = None
     feature_times: dict[str, float] = field(default_factory=dict)
+    filament_map: list[int] = field(default_factory=list)  # 1-based extruder per filament
     warnings: list[str] = field(default_factory=list)
     log_tail: str = ""
 
@@ -137,9 +139,14 @@ def slice_files(
     settings_dir: Path,
     slice_plates: bool = True,
     overrides: dict | None = None,
+    arrange: bool = False,
     timeout: int = 600,
 ) -> SliceResult:
-    """Slice STL/3MF models with the Bambu Studio CLI and export a project 3MF."""
+    """Slice STL/3MF models with the Bambu Studio CLI and export a project 3MF.
+
+    With arrange=False the models' own XY positions (bed coordinates) are kept. The CLI's auto-arrange only
+    places objects where every nozzle reaches, so it rejects parts that need the full single-nozzle area.
+    """
     cmd = bambu_command()
     if not cmd:
         return SliceResult(False, -1, "Bambu Studio not found")
@@ -155,7 +162,7 @@ def slice_files(
     args = cmd + [
         "--load-settings", f"{m};{pr}",
         "--load-filaments", ";".join(str(f) for f in fs),
-        "--arrange", "1",
+        "--arrange", "1" if arrange else "0",
         "--orient", "0",
         "--outputdir", str(out_3mf.parent),
         "--export-3mf", out_3mf.name,
@@ -180,6 +187,13 @@ def slice_files(
                       log_tail="\n".join(log.splitlines()[-40:]))
     if ok and slice_plates:
         _parse_result_json(rj, res)
+        for gcode in sorted(out_3mf.parent.glob("plate_*.gcode")):
+            with gcode.open() as fh:
+                for line in islice(fh, 5000):
+                    if line.startswith("; filament_map = "):
+                        res.filament_map = [int(x) for x in line.split("=", 1)[1].split(",")]
+                        break
+            break
     return res
 
 

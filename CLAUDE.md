@@ -55,17 +55,18 @@ def assembly(p, s, parts) -> dict  # optional; assembled positions -> assembly.p
 def check(p, s, parts)             # optional; yield (ok: bool, "R1 message") per requirement
 ```
 
-`s` is `cadlib.config.Settings`: `s.clearance(kind)`, `s.nozzle`, `s.layer_height`, `s.material.key`, `s.design[...]`, `s.build_volume`. All parts of a project are sliced together on one plate with the project's material.
+`s` is `cadlib.config.Settings`: `s.clearance(kind)`, `s.nozzle`, `s.layer_height`, `s.material.key`, `s.design[...]`, `s.nozzles` (per-nozzle regions), `s.shared` (region every nozzle reaches), `s.build_volume` (largest single-nozzle volume). All parts of a project are sliced together on one plate with the project's material.
 
 ## Reading the report
 
+- **build volume**: PASS if the part fits the region both nozzles reach (235.5 x 256 x 256). WARN if it only fits after a 90 deg rotation about Z, or only fits the left nozzle (256 x 256 x 261). FAIL if no nozzle can print it. See "X2D nozzles" below.
 - **manifold** FAIL: the solid is broken; usually a bad boolean or a zero-thickness feature. Fix before anything else.
 - **bodies** WARN: several disconnected solids in one part. Fine for intentional multi-object plates, otherwise a feature didn't fuse (coincident faces; overlap booleans by 0.01 mm).
 - **overhangs** (red in renders): downward faces steeper than 45 deg from vertical. Fix by reorienting, chamfering instead of filleting, or 45 deg transitions. A 45 deg chamfer sits exactly at the limit and passes.
 - **bridges** (orange): flat downward faces. `bridge` = supported on opposite sides, warns past 15 mm. `cantilever` = shelf supported on one side, warns past 2 mm. `floating` = nothing below any edge, needs support.
 - **wall thickness** (magenta dots): ray-cast thickness. Expect hits at chamfer tips and sharp edges; judge from the location given. Below 1.2 mm warns, below 0.8 mm fails.
 - **interference**: overlap volume between assembled parts. Contact (gap 0.000) is normal for resting parts.
-- **slice**: Bambu Studio CLI result, time and grams. A slicer failure fails the build.
+- **slice**: Bambu Studio CLI result, time, grams and which nozzle the filament was mapped to. A slicer failure fails the build.
 
 ## FDM design rules (0.4 mm nozzle, 0.2 mm layers)
 
@@ -78,7 +79,21 @@ def check(p, s, parts)             # optional; yield (ok: bool, "R1 message") pe
 - Text: emboss/engrave >= 0.6 mm deep, strokes >= 0.5 mm wide, font >= 6 mm tall; on vertical faces or the top face, not on the bed face unless mirrored deliberately.
 - Avoid large flat bottoms with sharp corners in ABS-GF (warping): round vertical corners, consider mouse ears.
 - Bridges up to ~15 mm are fine; longer ones sag. Break long ceilings with ribs or put them on the bed.
-- Build volume used by checks: 235 x 256 x 256 mm (both X2D nozzles reach it).
+
+## X2D nozzles
+
+The X2D has two nozzles with different reach. Numbers come from the machine preset (`extruder_printable_area`, `extruder_printable_height`), read at build time; bed coordinates have the origin at the front-left corner.
+
+| Nozzle | Drive | X | Y | Max Z | Volume |
+|---|---|---|---|---|---|
+| Left (main, extruder 1) | direct drive | 0-256 | 0-256 | 261 | 256 x 256 x 261 |
+| Right (auxiliary, extruder 2) | Bowden | 20.5-256 | 0-256 | 256 | 235.5 x 256 x 256 |
+
+- The right nozzle can't reach the leftmost 20.5 mm strip of the bed or the top 5 mm of height. Bambu's spec sheet lists the main nozzle as 260 mm tall; the slicer preset allows 261.
+- Multi-material prints, and anything that may be printed on the right nozzle, must stay within the shared 235.5 x 256 x 256 region. Only single-material prints on the left nozzle can use the full 256 x 256 x 261.
+- Y is 256 for both nozzles, so a part over 235.5 mm in one direction usually fits both after turning its long side along Y. Do that unless the orientation matters.
+- Flexible filament (TPU) goes on the left, direct-drive nozzle; the Bowden right nozzle feeds it poorly.
+- `cad build` lays the parts out on the plate itself (shelf packing, 5 mm gaps), inside the shared region when everything fits and the full left-nozzle region otherwise. The slicer's own auto-arrange only uses the shared region and rejects bigger parts, so it is turned off. The CLI maps a single filament to the left nozzle; the report says which nozzle was used. When printing from the GUI with the AMS, the nozzle is chosen at print time.
 
 ## Materials on hand
 
@@ -97,9 +112,11 @@ PLA (default), PETG, ABS-GF, TPU 95A (untested on this printer). Per-material sl
 - Python via uv only (`uv run ...`, `uv add ...`). Python is pinned to 3.13.
 - Bambu Studio is the flatpak `com.bambulab.BambuStudio`. The CLI needs flattened presets; `bambu.py` resolves `inherits` chains from the system profiles and the user's presets in `~/.var/app/com.bambulab.BambuStudio/config/BambuStudio/user/`. The default machine preset is the user's `My X2D 0.4 nozzle`.
 - The slicer logs a GLFW/OpenGL error when run headless; it only affects plate thumbnails.
+- The flatpak only sees `$HOME`, so files passed to the slicer must live under it (not `/tmp`). Tests use `.tmp-test/` (gitignored).
 
 ## Git
 
-- One repo for the whole folder, remote on GitHub. `out/` is gitignored; it is regenerated by `cad build`.
+- One repo for the whole folder, remote on GitHub (`theepicflyer/claude-3d`, private). `out/` is gitignored; it is regenerated by `cad build`.
+- Claude owns git here: branch, PR and merge without asking once tests pass and the work has been walked through.
 - Work on a branch per project or tooling change, in a worktree under `.worktrees/` (gitignored); run `uv sync` in a new worktree. Open a PR when the build passes and the renders have been reviewed. Merge commits, no force pushes.
 - Keep this file, README.md and each project's CLAUDE.md current when behavior or decisions change.
