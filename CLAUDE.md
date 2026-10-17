@@ -15,7 +15,7 @@ cadlib/               shared library and the `cad` CLI
   render.py           offscreen PNG contact sheets
   topology.py         exact B-rep edges/faces per part, for the review app
   bambu.py            Bambu Studio presets, CLI slicing, opening projects
-  features.py         FDM helpers: screw/nut tables, teardrop, nut trap, elephant-foot chamfer
+  features.py         FDM helpers: screw/nut tables, teardrop, nut trap
   review/             browser review app (server, static files, vendored three.js r170) and comment store
   template/           copied by `cad new`
 projects/<name>/
@@ -165,7 +165,8 @@ uv run pytest -q
 - **Walls:** at least 1.2 mm (3 lines); structural walls 2 mm or more. Floors and roofs at least 1.0 mm (5 layers). Prefer multiples of about 0.42 mm.
 - **Strength:** parts are weakest across layer lines (Z). Orient so bending and tension run along the layers. Snap-fit arms and clips should flex in the XY plane.
 - **Edges:**
-  - Edges on the bed get a 0.4 mm chamfer against elephant foot (`F.elephant_foot_chamfer`).
+  - No elephant-foot compensation: the X2D lays a true first layer (user's standing rule). Leave edges on the bed sharp.
+  - Round every corner of the bed footprint, inside and outside, so corners don't lift.
   - Other downward-facing edges get a chamfer, not a fillet.
   - Fillets are fine on vertical and upward-facing edges.
 - **Holes:** horizontal holes use `F.teardrop` (point up), or accept a slightly drooped top under about 6 mm. Vertical holes print 0.1-0.2 mm undersize; `F.SCREW_CLEARANCE` already allows for that.
