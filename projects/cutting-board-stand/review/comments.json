@@ -284,6 +284,165 @@
      "at": "2026-10-17 16:39:47"
     }
    ]
+  },
+  {
+   "id": 6,
+   "status": "resolved",
+   "created": "2026-10-17 16:47:26",
+   "build": {
+    "commit": "5fcaa7a",
+    "dirty": true,
+    "built_at": "2026-10-17 16:45:05"
+   },
+   "anchor": {
+    "kind": "circle",
+    "part": "stand",
+    "point": [
+     239.896,
+     196.964,
+     0.31
+    ],
+    "normal": [
+     -0.155,
+     0.684,
+     -0.713
+    ],
+    "frame": "part",
+    "view": "print",
+    "radius": 6.827,
+    "view_dir": [
+     -0.013,
+     -0.119,
+     -0.993
+    ],
+    "parts": [
+     "stand"
+    ]
+   },
+   "camera": {
+    "position": [
+     225.10420911476317,
+     196.8984803277363,
+     -224.42957379090188
+    ],
+    "target": [
+     212.5099100558589,
+     164.59228126104057,
+     98.54731429560177
+    ],
+    "layout": "print"
+   },
+   "screenshot": "shots/6.png",
+   "messages": [
+    {
+     "by": "user",
+     "text": "smooth this out.",
+     "at": "2026-10-17 16:47:26"
+    },
+    {
+     "by": "claude",
+     "text": "The rail ended just short of the panel's rounded end and left a notch. The base is now drawn as one plan-view frame: panel footprints plus rails, all corners rounded. The front rail is now flush with the panel end, so the notch is gone.",
+     "at": "2026-10-17 16:52:23"
+    }
+   ]
+  },
+  {
+   "id": 7,
+   "status": "resolved",
+   "created": "2026-10-17 16:47:26",
+   "build": {
+    "commit": "5fcaa7a",
+    "dirty": true,
+    "built_at": "2026-10-17 16:45:05"
+   },
+   "anchor": {
+    "kind": "circle",
+    "part": "stand",
+    "point": [
+     236.941,
+     185.815,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     -1
+    ],
+    "frame": "part",
+    "view": "print",
+    "radius": 4.214,
+    "view_dir": [
+     0,
+     -0.07,
+     -0.998
+    ],
+    "parts": [
+     "stand"
+    ]
+   },
+   "camera": {
+    "position": [
+     225.10420911476317,
+     196.8984803277363,
+     -224.42957379090188
+    ],
+    "target": [
+     212.5099100558589,
+     164.59228126104057,
+     98.54731429560177
+    ],
+    "layout": "print"
+   },
+   "screenshot": "shots/7.png",
+   "messages": [
+    {
+     "by": "user",
+     "text": "make all the corners that sit flat on the print plate filleted. reduces chance of lifing. both interior and exterior corners",
+     "at": "2026-10-17 16:47:26"
+    },
+    {
+     "by": "claude",
+     "text": "Done. Every corner on the bed is rounded: 4.5 mm on the outside (matching the panels' rounded ends) and 3 mm on the inside where the rails meet the panels. I've added this to the repo-wide FDM rules too.",
+     "at": "2026-10-17 16:52:25"
+    }
+   ]
+  },
+  {
+   "id": 8,
+   "status": "resolved",
+   "created": "2026-10-17 16:47:26",
+   "build": {
+    "commit": "5fcaa7a",
+    "dirty": true,
+    "built_at": "2026-10-17 16:45:05"
+   },
+   "anchor": null,
+   "camera": {
+    "position": [
+     225.10420911476317,
+     196.8984803277363,
+     -224.42957379090188
+    ],
+    "target": [
+     212.5099100558589,
+     164.59228126104057,
+     98.54731429560177
+    ],
+    "layout": "print"
+   },
+   "screenshot": "shots/8.png",
+   "messages": [
+    {
+     "by": "user",
+     "text": "no need for elephants foot compensation. the printer is good enough to do the first layer perfectly. that's a standing rule",
+     "at": "2026-10-17 16:47:26"
+    },
+    {
+     "by": "claude",
+     "text": "Removed here. CLAUDE.md now says no elephant-foot compensation, bed edges stay sharp.",
+     "at": "2026-10-17 16:52:27"
+    }
+   ]
   }
  ]
 }

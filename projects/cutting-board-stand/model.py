@@ -10,8 +10,8 @@ edge, Y out from the foot of the wall curve, Z up. Items lean back toward the wa
 import math
 
 import numpy as np
-from build123d import (Align, Axis, Box, Cylinder, Face, Line, Plane, Polygon, Pos, Rot, ThreePointArc, Vector, Wire,
-                       chamfer, extrude, fillet)
+from build123d import (Align, Axis, Box, Cylinder, Face, Plane, Pos, Rectangle, Rot, Vector, Wire,
+                       extrude, fillet)
 
 PARAMS = dict(
     # Items (user's measurements). Slots from the back: big board, baking sheet, small board.
@@ -42,7 +42,8 @@ PARAMS = dict(
     floor_r=4.0,       # inside corners of the slot floor (smaller where the item's corner is close)
     rest_min=18.0,     # middle fingers are at least this wide at the top; matches the small board's rest
     # Rails
-    rail_w=12.0, rail_h=12.0,
+    rail_w=10.0, rail_h=12.0,
+    joint_r=3.0,       # rounds the inside corners where rails meet the panels
 )
 
 PRINT = dict(material="petg", slicer={"curr_bed_type": "Textured PEI Plate"})
@@ -197,23 +198,29 @@ def build(p, s):
     xa, xb = panel_xs(p)
     stand = Pos(xa - p.panel_w / 2, 0, 0) * panel + Pos(xb - p.panel_w / 2, 0, 0) * panel
 
+    # Base frame: both panels' footprints plus three rails, drawn in plan with every corner rounded (outer corners
+    # match the panels' rounded ends; inner corners keep the footprint from lifting), then rounded along its top.
+    # The end rails are flush with the panel ends, so the back and front are one flat face.
     y0, y1 = extent(p)
-    rail = Box(xb - xa, p.rail_w, p.rail_h, align=(Align.MIN, Align.CENTER, Align.MIN))
-    rail = fillet(rail.edges().filter_by(Axis.X).group_by(Axis.Z)[-1], p.rail_w / 2 - 0.1)
-    for ry in rail_ys(p):
-        stand += Pos(xa, ry, 0) * rail
-    # Elephant-foot chamfer where a wall meets the bed
-    feet = {e for fc in stand.faces() if abs(fc.normal_at().Z) < 1e-3 for e in fc.edges()
-            if e.bounding_box().max.Z < 1e-3}
-    stand = chamfer(list(feet), 0.4)
+    ym = rail_ys(p)[1]
+    h = p.panel_w / 2
+    rect = lambda xl, xh, yl, yh: Pos((xl + xh) / 2, (yl + yh) / 2) * Rectangle(xh - xl, yh - yl)
+    plan = (rect(xa - h, xb + h, y0, y1) - rect(xa + h, xb - h, y0 + p.rail_w, ym - p.rail_w / 2)
+            - rect(xa + h, xb - h, ym + p.rail_w / 2, y1 - p.rail_w)).faces()[0]
+    plan = plan.fillet_2d(p.edge_r, [v for v in plan.vertices() if abs(abs(v.X - p.x_center) - p.panel_span / 2 - h) < 1e-6])
+    plan = plan.fillet_2d(p.joint_r, [v for v in plan.vertices() if abs(abs(v.X - p.x_center) - p.panel_span / 2 + h) < 1e-6])
+    frame = extrude(plan, p.rail_h)
+    frame = fillet(frame.edges().group_by(Axis.Z)[-1], p.edge_r - 0.1)
+    stand += frame
     return {"stand": stand}
 
 
 def rail_ys(p):
-    """Back, middle and front rails, each under a finger rather than under a slot."""
+    """Back, middle and front rails."""
     y0, y1 = extent(p)
     lay = layout(p)
-    return [y0 + p.rail_w / 2 + 6, (lay["big"]["C0"][0] + lay["sheet"]["P"][0]) / 2, (lay["small"]["C0"][0] + y1) / 2]
+    # End rails are flush with the panel ends
+    return [y0 + p.rail_w / 2, (lay["big"]["C0"][0] + lay["sheet"]["P"][0]) / 2, y1 - p.rail_w / 2]
 
 
 def item_solid(p, k, slot=None):
@@ -400,4 +407,4 @@ def features(p, s, parts):
                    params=["front_clear"],
                    text=f"Vertical front wall of the slot, {p.front_clear:.0f} mm clear of the item at the floor, so the item lifts straight up.")
     yield dict(name="cross rail", part="stand", at=(p.x_center, rail_ys(p)[1], p.rail_h), normal=(0, 0.3, 1),
-               params=["rail_w", "rail_h"], text="Round-topped rail tying the two panels together. Three of them, each under a finger.")
+               params=["rail_w", "rail_h", "joint_r"], text="Round-topped rail tying the two panels together, with rounded inside corners where it meets them. The back and front rails are flush with the panel ends.")

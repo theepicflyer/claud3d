@@ -33,7 +33,7 @@ Measured by the user with a tape measure (2026-10-17).
 - Supports: none. Nothing overhangs; the fingers lean at most 5°.
 - Slicer changes from defaults: plate type set to Textured PEI (PETG isn't allowed on the default Cool Plate).
 - After printing: stick silicone bumpers under both ends of each panel (four in all).
-- Slice: 4h 07m, 132 g.
+- Slice: 4h 03m, 130 g.
 
 ## Decisions
 
@@ -48,6 +48,8 @@ Measured by the user with a tape measure (2026-10-17).
 - Each item rests on the round cap of the finger behind it. The finger's front edge stands 3° more upright than the item, so the gap opens downward and only the cap touches. The model solves the slot position so the cap is tangent to the item's back face.
 - Slot front walls are vertical with 5 mm clearance at the floor. Lifting a leaning item straight up moves its front face forward by tan 8° per mm, so a front wall leaning with the item would catch it.
 - Review #2 (2026-10-17): the finger behind the sheet was 12 mm wide at the top, between the 33 mm back finger and the 17 mm one behind the small board, which read as thick-thin-thick. The user also wants to be able to put the small board in either middle slot. The front wall of the big board's slot now leans back about 3°, just enough to bring that finger to 18 mm, matching the small board's (`rest_min`). It stays upright enough for a straight lift: the board's front-bottom corner would only reach the wall about 99 mm up, above the top of the finger.
+- Review #3 (2026-10-17): the bed footprint is a frame drawn in plan, made of both panel footprints and three rails. Its outer corners match the panels' 4.5 mm rounded ends, and its inside corners have 3 mm radii so nothing lifts. It's rounded along the top, so the rails come out round-topped. The back and front rails are flush with the panel ends (the user asked for the back; the front matches), so the footprint has no stray corners. Rails are 10 mm wide so their tops are almost fully round. Blending the rails into the panels with a 3D fillet failed in OCC where it met the panels' rounded ends, so the base is drawn in plan instead.
+- No elephant-foot chamfers (user's standing rule, 2026-10-17).
 - Feet are the user's stick-on silicone bumpers (2026-10-17). The underside is flat, and there are no printed feet or arches.
 - R6 mass assumptions: wood 0.75 g/cm³ (big board about 1.9 kg), baking sheet 1 kg, stand at 30% effective fill. Heavier infill in the base only improves it.
 
