@@ -12,11 +12,13 @@ cadlib/               shared library + `cad` CLI
   render.py           offscreen PNG contact sheets (pyvista)
   bambu.py            Bambu Studio preset flattening, CLI slicing, opening projects
   features.py         FDM helpers: screw/nut tables, teardrop, nut trap, elephant-foot chamfer
+  review/             browser review app (server.py + static/ with vendored three.js r170) and comment store
   template/           copied by `cad new`
 projects/<name>/
   CLAUDE.md           that project's requirements, interfaces, print notes, decisions, print log
   model.py            the parametric model
-  out/                generated (gitignored): STEP, STL, PNG renders, report.md/json, slice/<name>.gcode.3mf
+  out/                generated (gitignored): STEP, STL, PNG renders, report.md/json, view.json, slice/<name>.gcode.3mf
+  review/             committed: comments.json (review threads) and shots/<id>.png
 tests/                pytest for checks and the example build
 ```
 
@@ -27,6 +29,9 @@ uv run cad new <name>                         scaffold projects/<name> (lowercas
 uv run cad build <name> [-p key=value ...]    build + export + check + render + slice; exits 1 on FAIL
     --no-slice --no-render --open
 uv run cad open <name> [--step]               open the sliced 3MF in Bambu Studio (or STEP in FreeCAD)
+uv run cad review <name> [--no-open] [--keep]  3D review app in the browser; exits printing the comments on Send
+uv run cad comments <name> [--all]            print open review threads (all with --all)
+uv run cad reply <name> <id> "text" [--resolve|--reopen]
 uv run cad profiles machine|process|filament [regex]
 uv run cad list
 uv run pytest -q
@@ -41,8 +46,18 @@ uv run pytest -q
 5. **Write `check()`** to verify each requirement by measuring the built geometry (bounding boxes, sections, distances), not by echoing parameters.
 6. **Build and review:** `uv run cad build <name>`. Read `out/report.md`, then **look at every PNG** in `out/` with the Read tool. Check the renders against the requirements: proportions, features present and in the right place, nothing floating, section shows the intended walls. The checks catch geometry problems; only looking catches design mistakes.
 7. **Iterate** until the report is PASS or every remaining WARN is understood and recorded in the project's Decisions section (e.g. an intentional overhang that will get support).
-8. **Hand off:** walk the user through the renders, report, slice time/filament, and decisions. Offer `uv run cad open <name>` to inspect in Bambu Studio. Commit and open a PR (see Git).
+8. **Hand off:** walk the user through the renders, report, slice time/filament, and decisions. Start the review app (see below) so they can inspect and comment. `uv run cad open <name>` opens the slice in Bambu Studio. Commit and open a PR (see Git).
 9. **After printing:** record results in the project's Print log. If fits are consistently tight or loose across projects, adjust `[fit]` or the material's `clearance_extra` in printer.toml rather than patching individual models.
+
+## Review loop
+
+The user reviews models in the browser and comments on them; comments come back to Claude without copy-paste.
+
+1. After a build, run `uv run cad review <name>` as a **background** Bash command. It serves on a fixed per-project port and opens a browser tab unless an existing tab reconnects within 4 s. Tell the user it's open.
+2. The user can rotate/pan/zoom, switch between the plate layout and the assembly, cut a section, pin points, circle areas, measure, and write comments or replies. "Send to Claude" saves them and the server exits, which re-invokes Claude with the printed comments.
+3. Each comment prints with its id, part, anchor in the **part's model frame** (the print-oriented frame from `build()` after the automatic drop to z=0, in mm, before plate placement), surface normal, the view it was made in, and the build it was made against. Read every screenshot path listed: it shows the user's viewpoint with the marker labelled "this" (and the circle for circled areas). Map coordinates back to features in `model.py` before changing anything; ask if a comment is ambiguous.
+4. Make the changes, rebuild, then answer each thread with `uv run cad reply <name> <id> "what changed" --resolve` (or without `--resolve` when asking a question back). Restart the review in the background; the user's open tab reconnects and shows the replies. `cad review --keep` keeps serving after a send, e.g. while rebuilding repeatedly; the tab reloads the model whenever `out/view.json` changes.
+5. `uv run cad comments <name>` lists open threads at any time, including from earlier sessions. Commit `review/` with the project.
 
 ## model.py contract
 
