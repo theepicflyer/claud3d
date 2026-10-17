@@ -1,6 +1,12 @@
 import * as THREE from 'three';
 import { OrbitControls } from '/static/vendor/OrbitControls.js';
 import { STLLoader } from '/static/vendor/STLLoader.js';
+import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from '/static/vendor/three-mesh-bvh.module.js';
+
+// Picking, snapping and label occlusion raycast every frame; brute force against 100k+ triangle meshes stalls the frame.
+THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 const PALETTE = [0x5a8cdc, 0xeb963c, 0x6eb96e, 0xd25a6e, 0xa078c8, 0x78bec8];
 const COLORS = { draft: 0xd9731a, open: 0x2f6fd6, resolved: 0x8a8a8f, measure: 0x222222, feature: 0x139c8c };
@@ -81,6 +87,7 @@ function clipList() { return section.axis ? [clipPlane] : []; }
 function makePart(name, key, geom, color, frame, topo) {
   const group = new THREE.Group();
   group.matrixAutoUpdate = false;
+  geom.computeBoundsTree();
   const front = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({
     color, roughness: 0.75, metalness: 0, flatShading: true, side: THREE.FrontSide,
     polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1, clippingPlanes: clipList() }));
@@ -99,6 +106,7 @@ function makePart(name, key, geom, color, frame, topo) {
 
 function disposePart(p) {
   world.remove(p.group);
+  p.front.geometry.disposeBoundsTree();
   p.front.geometry.dispose();
   p.edges.geometry.dispose();
   for (const m of [p.front, p.back, p.edges]) m.material.dispose();

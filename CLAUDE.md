@@ -16,7 +16,7 @@ cadlib/               shared library and the `cad` CLI
   topology.py         exact B-rep edges/faces per part, for the review app
   bambu.py            Bambu Studio presets, CLI slicing, opening projects
   features.py         FDM helpers: screw/nut tables, teardrop, nut trap
-  review/             browser review app (server, static files, vendored three.js r170) and comment store
+  review/             browser review app (server, static files, vendored three.js r170 and three-mesh-bvh 0.8.3) and comment store
   template/           copied by `cad new`
 projects/<name>/
   CLAUDE.md           the project's requirements, interfaces, print notes, decisions, print log
