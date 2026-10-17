@@ -103,13 +103,12 @@ def run_build(project: Path, overrides: dict | None = None, do_render: bool = Tr
     parts = build_parts(mod, p, s)
     log(f"built {len(parts)} part(s) in {time.time() - t0:.1f}s: {', '.join(parts)}")
     sections = getattr(mod, "SECTIONS", {})
-    stls = []
+    meshes = {}
     for name, shape in parts.items():
-        mesh = render.tessellate(shape)
+        mesh = meshes[name] = render.tessellate(shape)
         step, stl = out / f"{name}.step", out / f"{name}.stl"
         export_step(shape, str(step))
         mesh.export(stl)
-        stls.append(stl)
         res.files += [step, stl]
         rep = checks.check_part(name, mesh, s)
         res.reports.append(rep)
@@ -130,15 +129,60 @@ def run_build(project: Path, overrides: dict | None = None, do_render: bool = Tr
             res.spec_findings.append(checks.Finding(checks.PASS if ok else checks.FAIL, "spec", msg))
 
     if do_slice:
-        res.slice = bambu.slice_files(stls, out / "slice" / f"{project.name}.gcode.3mf", s.machine_profile,
-                                      s.process_profile, s.material.filament_profile, out / "slice" / "profiles",
-                                      overrides=s.slicer_overrides)
-        if res.slice.project_3mf:
-            res.files.append(res.slice.project_3mf)
+        placed = place_on_plate(meshes, s)
+        if placed is None:
+            res.slice = bambu.SliceResult(False, -1, "parts don't fit on one plate together; split them across projects")
+        else:
+            plate_dir = out / "slice" / "plate"
+            plate_dir.mkdir(parents=True, exist_ok=True)
+            plate_stls = []
+            for name, m in placed.items():
+                plate_stls.append(plate_dir / f"{name}.stl")
+                m.export(plate_stls[-1])
+            res.slice = bambu.slice_files(plate_stls, out / "slice" / f"{project.name}.gcode.3mf", s.machine_profile,
+                                          s.process_profile, s.material.filament_profile, out / "slice" / "profiles",
+                                          overrides=s.slicer_overrides)
+            if res.slice.project_3mf:
+                res.files.append(res.slice.project_3mf)
 
     write_report(res, p, s)
     log(f"done in {time.time() - t0:.1f}s")
     return res
+
+
+def place_on_plate(meshes: dict, s: Settings, gap: float = 5.0) -> dict | None:
+    """Shelf-pack parts in bed coordinates. Uses the region every nozzle reaches when all parts fit it."""
+    sizes = {n: m.bounds[1] - m.bounds[0] for n, m in meshes.items()}
+    shared = s.shared
+    region = shared if all(checks.fits(v, shared.size) for v in sizes.values()) else max(
+        s.nozzles, key=lambda z: z.size[0] * z.size[1] * z.size[2])
+    width = region.x[1] - region.x[0]
+    rows, row, row_w = [], [], 0.0
+    for n in sorted(sizes, key=lambda n: -sizes[n][1]):
+        w = sizes[n][0]
+        if row and row_w + gap + w > width:
+            rows.append(row)
+            row, row_w = [], 0.0
+        row_w += (gap if row else 0) + w
+        row.append(n)
+    rows.append(row)
+    depth = sum(max(sizes[n][1] for n in r) for r in rows) + gap * (len(rows) - 1)
+    total_w = max(sum(sizes[n][0] for n in r) + gap * (len(r) - 1) for r in rows)
+    if total_w > width + 1e-6 or depth > region.y[1] - region.y[0] + 1e-6:
+        return None
+    x0 = (region.x[0] + region.x[1] - total_w) / 2
+    y = (region.y[0] + region.y[1] + depth) / 2
+    placed = {}
+    for r in rows:
+        y -= max(sizes[n][1] for n in r)
+        x = x0
+        for n in r:
+            m = meshes[n].copy()
+            m.apply_translation([x - m.bounds[0][0], y - m.bounds[0][1], -m.bounds[0][2]])
+            placed[n] = m
+            x += sizes[n][0] + gap
+        y -= gap
+    return placed
 
 
 def _fmt_time(sec: float) -> str:
@@ -165,7 +209,8 @@ def write_report(res: BuildResult, p: SimpleNamespace, s: Settings) -> Path:
         sl = res.slice
         lines += ["## slice", ""]
         if sl.ok:
-            lines += [f"- time {_fmt_time(sl.print_time_s or 0)}, filament {sl.filament_g or 0:.1f} g",
+            nozzles = ", ".join(s.nozzles[i - 1].name for i in sl.filament_map if 0 < i <= len(s.nozzles)) or "unknown"
+            lines += [f"- time {_fmt_time(sl.print_time_s or 0)}, filament {sl.filament_g or 0:.1f} g, nozzle {nozzles}",
                       f"- project: {sl.project_3mf.relative_to(res.project)}"]
             lines += [f"- WARN slicer: {w}" for w in sl.warnings]
         else:

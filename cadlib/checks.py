@@ -109,6 +109,31 @@ def wall_thickness(mesh: trimesh.Trimesh, samples: int = 4000, seed: int = 0) ->
     return d, pts[ray_idx][facing]
 
 
+def fits(size, volume) -> bool:
+    return all(a <= b + 1e-6 for a, b in zip(size, volume, strict=True))
+
+
+def _dims(v) -> str:
+    return " x ".join(f"{x:g}" for x in v)
+
+
+def _volume_check(size, s: Settings) -> tuple[str, str]:
+    sz = tuple(round(float(x), 2) for x in size)
+    shared = s.shared.size
+    rotated = (sz[1], sz[0], sz[2])
+    able = [z for z in s.nozzles if fits(sz, z.size)]
+    if fits(sz, shared):
+        return PASS, f"{_dims(sz)} fits the region every nozzle reaches ({_dims(shared)})"
+    if fits(rotated, shared):
+        return WARN, (f"{_dims(sz)} only fits every nozzle's region ({_dims(shared)}) rotated 90 deg about Z; "
+                      "rotate it in the model so either nozzle can print it")
+    if able:
+        names = ", ".join(f"{z.name}, {z.drive}" for z in able)
+        return WARN, (f"{_dims(sz)} only fits the {names} nozzle ({_dims(able[0].size)}); "
+                      f"single-material only, and the filament must be loaded on that nozzle")
+    return FAIL, f"{_dims(sz)} exceeds every nozzle ({'; '.join(f'{z.name} {_dims(z.size)}' for z in s.nozzles)})"
+
+
 def check_part(name: str, mesh: trimesh.Trimesh, s: Settings) -> PartReport:
     r = PartReport(name)
     d = s.design
@@ -132,11 +157,9 @@ def check_part(name: str, mesh: trimesh.Trimesh, s: Settings) -> PartReport:
         r.add(WARN, "bodies", f"{len(bodies)} disconnected bodies (intended? floating parts print as separate objects)")
     r.stats["bodies"] = len(bodies)
 
-    bv = np.array(s.build_volume)
-    if (size <= bv).all():
-        r.add(PASS, "build volume", f"{size[0]:.1f} x {size[1]:.1f} x {size[2]:.1f} fits {bv[0]:.0f} x {bv[1]:.0f} x {bv[2]:.0f}")
-    else:
-        r.add(FAIL, "build volume", f"{size[0]:.1f} x {size[1]:.1f} x {size[2]:.1f} exceeds {bv[0]:.0f} x {bv[1]:.0f} x {bv[2]:.0f}")
+    status, detail = _volume_check(size, s)
+    r.add(status, "build volume", detail)
+    r.stats["nozzles"] = [z.name for z in s.nozzles if fits(size, z.size)]
 
     n = mesh.face_normals
     cz = mesh.triangles_center[:, 2]

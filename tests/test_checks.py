@@ -22,9 +22,24 @@ def test_plain_block_passes(s):
     assert rep.stats["bbox"] == [20, 20, 10]
 
 
-def test_too_big_fails(s):
-    st, _ = statuses(Box(300, 20, 10), s)
-    assert st["build volume"] == checks.FAIL
+def test_nozzle_regions_from_profile(s):
+    left, right = s.nozzles
+    assert left.size == (256, 256, 261) and left.drive == "direct drive"
+    assert right.size == (235.5, 256, 256) and right.x == (20.5, 256) and right.drive == "bowden"
+    assert s.shared.size == (235.5, 256, 256)
+
+
+@pytest.mark.parametrize("dims, status, phrase", [
+    ((200, 200, 200), checks.PASS, "every nozzle"),
+    ((250, 200, 10), checks.WARN, "rotated 90 deg"),
+    ((250, 250, 10), checks.WARN, "left (main)"),
+    ((20, 20, 258), checks.WARN, "left (main)"),
+    ((300, 20, 10), checks.FAIL, "exceeds"),
+])
+def test_build_volume_per_nozzle(s, dims, status, phrase):
+    _, rep = statuses(Box(*dims), s)
+    f = next(f for f in rep.findings if f.check == "build volume")
+    assert f.status == status and phrase in f.detail, f.detail
 
 
 def test_overhang_detected(s):

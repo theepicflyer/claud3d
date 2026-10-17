@@ -7,8 +7,11 @@ machine_profile = "My X2D 0.4 nozzle"
 process_profile = "0.20mm Standard @BBL X2D"
 nozzle = 0.4
 layer_height = 0.2
-# Left nozzle reaches 256x256x261; right nozzle only X >= 20.5 and Z <= 256. Use the intersection to be safe.
-build_volume = [235, 256, 256]
+# Per-nozzle print regions come from the machine preset (extruder_printable_area/height), not from here:
+#   left (main, direct drive):   X 0-256,    Y 0-256, Z 261   -> 256 x 256 x 261 mm
+#   right (auxiliary, Bowden):   X 20.5-256, Y 0-256, Z 256   -> 235.5 x 256 x 256 mm
+# The right nozzle can't reach the leftmost 20.5 mm of the bed or the top 5 mm. Multi-material prints are
+# limited to the shared region (235.5 x 256 x 256). Flexible filament (TPU) belongs on the direct-drive left nozzle.
 
 [design]
 min_wall = 1.2          # 3 perimeters at 0.4 nozzle; below this gets a warning
@@ -45,4 +48,4 @@ notes = "Stiff, heat resistant (~95 C), dimensionally stable for ABS. Needs encl
 [materials.tpu]
 filament_profile = "Bambu TPU 95A HF @BBL X2D 0.4 nozzle"
 clearance_extra = 0.10
-notes = "Flexible (95A). Untested on this X2D. Prints slow, strings, no AMS for standard TPU. Avoid supports and bridges, use thicker walls (>= 1.6 mm) and generous clearances."
+notes = "Flexible (95A). Untested on this X2D. Left (direct-drive) nozzle only. Prints slow, strings, no AMS for standard TPU. Avoid supports and bridges, use thicker walls (>= 1.6 mm) and generous clearances."
