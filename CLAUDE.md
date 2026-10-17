@@ -222,7 +222,7 @@ On hand: PLA (the default), PETG, ABS-GF, and TPU 95A, which hasn't been tried o
 ### Git
 
 - **The repo:** one repo for the whole folder, on GitHub as `theepicflyer/claude-3d` (private).
-- **Ownership:** Claude owns git here. It branches, opens PRs and merges without asking, once tests pass and the work has been walked through with the user.
+- **Ownership:** Claude owns git here. It branches, opens PRs and merges them itself as soon as tests pass, without waiting for approval, then walks the user through what changed.
 - **Workflow:**
   - Work on one branch per project or tooling change, in a worktree under `.worktrees/` (gitignored), and run `uv sync` in a new worktree.
   - Use merge commits; no force pushes.
