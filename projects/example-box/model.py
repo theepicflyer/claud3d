@@ -16,8 +16,8 @@ PARAMS = dict(
     lip_wall=1.6,
     fit="snug",       # R3 lid fit class from printer.toml [fit]
     lead_in=0.4,      # chamfer on lip tip to guide the lid in
-    scallop_w=20.0,   # R4 finger scallop in the +X wall's rim
-    scallop_d=5.0,
+    scallop_w=14.0,   # R4 finger scallop in the +X wall's rim (chord width)
+    scallop_d=2.2,    # R4 must stay above the lip's lead-in so only the lid shows through it
     scallop_round=0.8,
 )
 
@@ -38,7 +38,7 @@ def build(p, s):
     box = rounded_block(ox, oy, height, p.corner_r)
     box -= Pos(0, 0, p.floor) * rounded_block(p.inner_x, p.inner_y, p.inner_z + 1, inner_r)
     if p.scallop_d > 0:
-        r = p.scallop_w / 2
+        r = (p.scallop_w ** 2 / 4 + p.scallop_d ** 2) / (2 * p.scallop_d)
         cutter = Pos(ox / 2 - p.wall / 2, 0, height + r - p.scallop_d) * Rot(0, 90, 0) * Cylinder(r, p.wall + 2)
         before = set(box.edges())
         box -= cutter
@@ -90,3 +90,12 @@ def check(p, s, parts):
     rim = parts["box"] & Pos(ox / 2 - p.wall / 2, 0, 0) * Box(p.wall / 2, 0.5, 1000)
     dip = p.floor + p.inner_z - rim.bounding_box().max.Z
     yield abs(dip - p.scallop_d) < 0.05, f"R4 finger scallop {dip:.2f} mm deep at the +X rim (want {p.scallop_d})"
+    # Looking into the scallop you should see the lid's lip, not the inside of the box: the lip's full-width
+    # outer face (above its lead-in chamfer) must reach below the scallop's lowest point.
+    asm = assembly(p, s, parts)
+    lx = p.inner_x - s.clearance(p.fit)
+    face = asm["lid"] & Pos(lx / 2 - 0.02, 0, 0) * Box(0.02, 0.5, 1000)
+    lip_bottom = face.bounding_box().min.Z
+    notch_bottom = p.floor + p.inner_z - dip
+    yield notch_bottom >= lip_bottom + 0.2, \
+        f"R4 scallop bottom z={notch_bottom:.2f} sits {notch_bottom - lip_bottom:.2f} mm above where the lip's face ends (z={lip_bottom:.2f})"
