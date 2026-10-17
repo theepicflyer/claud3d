@@ -29,6 +29,13 @@ def build(p, s):
 #     return {"part": parts["part"]}
 
 
+def features(p, s, parts):
+    """Yield named callouts for the review app's labels and walkthrough. Use the words the user should use."""
+    bb = parts["part"].bounding_box()
+    yield dict(name="top face", part="part", at=(0, 0, bb.max.Z), normal=(0, 0, 1), params=["size_z"],
+               text="Upper face; the part is printed with the opposite face on the bed.")
+
+
 def check(p, s, parts):
     """Yield (ok, message) per requirement, measured from the geometry. Prefix messages with the requirement id."""
     bb = parts["part"].bounding_box()

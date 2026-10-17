@@ -13,11 +13,12 @@ cadlib/               shared library + `cad` CLI
   bambu.py            Bambu Studio preset flattening, CLI slicing, opening projects
   features.py         FDM helpers: screw/nut tables, teardrop, nut trap, elephant-foot chamfer
   review/             browser review app (server.py + static/ with vendored three.js r170) and comment store
+  topology.py         exact B-rep vertices/edges/faces per part, for snapping and outlines in the review app
   template/           copied by `cad new`
 projects/<name>/
   CLAUDE.md           that project's requirements, interfaces, print notes, decisions, print log
   model.py            the parametric model
-  out/                generated (gitignored): STEP, STL, PNG renders, report.md/json, view.json, slice/<name>.gcode.3mf
+  out/                generated (gitignored): STEP, STL, <part>.topo.json, PNG renders, report.md/json, view.json, slice/
   review/             committed: comments.json (review threads) and shots/<id>.png
 tests/                pytest for checks and the example build
 ```
@@ -54,8 +55,8 @@ uv run pytest -q
 The user reviews models in the browser and comments on them; comments come back to Claude without copy-paste.
 
 1. After a build, run `uv run cad review <name>` as a **background** Bash command. It serves on a fixed per-project port and opens a browser tab unless an existing tab reconnects within 4 s. Tell the user it's open.
-2. Navigation is on the right mouse button (drag pans, Ctrl+drag or middle-drag rotates, wheel zooms); the left button runs the current tool: 1 pin, 2 circle, 3 measure. The user can also switch between the plate layout and the assembly, cut a section, and write comments or replies. Shift+right-drag can't rotate because Firefox-based browsers (Zen is installed here) always open their context menu on Shift+right-click. An open tab reloads itself when files in `cadlib/review/static/` change, keeping its camera and unsent drafts. "Send to Claude" saves the comments and the server exits, which re-invokes Claude with the printed comments.
-3. Each comment prints with its id, part, anchor in the **part's model frame** (the print-oriented frame from `build()` after the automatic drop to z=0, in mm, before plate placement), surface normal, the view it was made in, and the build it was made against. Read every screenshot path listed: it shows the user's viewpoint with the marker labelled "this" (and the circle for circled areas). Map coordinates back to features in `model.py` before changing anything; ask if a comment is ambiguous.
+2. Navigation is on the right mouse button (drag pans, Ctrl+drag or middle-drag rotates, wheel zooms); the left button runs the current tool: 1 pin, 2 circle, 3 measure. Measure snaps to B-rep vertices, circle centers, edge midpoints and edges (Ctrl+click places freely), shows distance, color-coded ΔX/ΔY/ΔZ legs, face-to-face distance for parallel flat faces and diameters of circular features. A panel shows the hovered point's coordinates in the part frame, and an axis triad shows orientation. The user can also switch between the plate layout and the assembly, cut a section, and write comments or replies. Shift+right-drag can't rotate because Firefox-based browsers (Zen is installed here) always open their context menu on Shift+right-click. An open tab reloads itself when files in `cadlib/review/static/` change, keeping its camera and unsent drafts. "Send to Claude" saves the comments and the server exits, which re-invokes Claude with the printed comments.
+3. Each comment prints with its id, part, the nearest feature callout, anchor in the **part's model frame** (the print-oriented frame from `build()` after the automatic drop to z=0, in mm, before plate placement), surface normal, the view it was made in, and the build it was made against. Read every screenshot path listed: it shows the user's viewpoint with the marker labelled "this" (and the circle for circled areas). Map coordinates back to features in `model.py` before changing anything; ask if a comment is ambiguous.
 4. Make the changes, rebuild, then answer each thread with `uv run cad reply <name> <id> "what changed" --resolve` (or without `--resolve` when asking a question back). Restart the review in the background; the user's open tab reconnects and shows the replies. `cad review --keep` keeps serving after a send, e.g. while rebuilding repeatedly; the tab reloads the model whenever `out/view.json` changes.
 5. `uv run cad comments <name>` lists open threads at any time, including from earlier sessions. Commit `review/` with the project.
 
@@ -68,7 +69,10 @@ SECTIONS = {"part": ("y", 0.0)}    # optional: section plane per part or "assemb
 def build(p, s) -> dict[str, Part] # required; print orientation; each part is dropped to z=0 automatically
 def assembly(p, s, parts) -> dict  # optional; assembled positions -> assembly.png + interference check
 def check(p, s, parts)             # optional; yield (ok: bool, "R1 message") per requirement
+def features(p, s, parts)          # expected; yield dict(name, part, at, text, params=[...], normal=..., view=...)
 ```
+
+`features()` callouts appear as labels in the review app, in its Features list and in a step-by-step walkthrough. They give the user names for things to use in comments, and comments made near one are tagged with it. `at` is a point in the part's print frame (or a face/edge, whose center is used), `normal` aims the walkthrough camera, `params` lists the PARAMS that control the feature (shown with their values), `view` picks "print" or "assembly" for the walkthrough. Write one per feature a user would talk about (walls, lips, holes, chamfers, clips, bosses), named in plain words, and keep them current as the model changes.
 
 `s` is `cadlib.config.Settings`: `s.clearance(kind)`, `s.nozzle`, `s.layer_height`, `s.material.key`, `s.design[...]`, `s.nozzles` (per-nozzle regions), `s.shared` (region every nozzle reaches), `s.build_volume` (largest single-nozzle volume). All parts of a project are sliced together on one plate with the project's material.
 

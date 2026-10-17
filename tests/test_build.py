@@ -25,6 +25,8 @@ def test_example_box_builds(do_slice):
     assert set(view["parts"]) == {"box", "lid"}
     lid = view["assembly"]["lid"]["matrix"]
     assert lid[2][2] == pytest.approx(-1) and lid[2][3] == pytest.approx(34)  # flipped onto the box
+    assert {f["name"] for f in view["features"]} >= {"lip", "finger scallop", "wall"}
+    assert view["params"]["lip_h"] == 3.0 and view["parts"]["box"]["topo"] == "box.topo.json"
 
 
 def test_plate_layout_uses_shared_region_when_possible():

@@ -53,3 +53,31 @@ def test_server_round_trip(project):
     th.join(timeout=5)
     assert not th.is_alive()
     srv.server_close()
+
+
+def test_topology_exports_snap_features():
+    from build123d import Box, Cylinder
+
+    from cadlib.topology import topology
+
+    t = topology(Box(20, 20, 10) - Cylinder(3, 20))
+    assert len(t["vertices"]) == 8 + 2  # box corners + one seam vertex per hole circle
+    circles = [e for e in t["edges"] if e["t"] == "circle"]
+    assert len(circles) == 2 and all(c["r"] == 3 and c["full"] for c in circles)
+    assert {f["t"] for f in t["faces"]} == {"plane", "cyl"}
+    assert next(f for f in t["faces"] if f["t"] == "cyl")["r"] == 3
+
+
+def test_feature_normalization():
+    from types import SimpleNamespace
+
+    from build123d import Box
+
+    from cadlib.project import _feature
+
+    part = Box(10, 10, 10)
+    top = part.faces().sort_by()[-1]
+    f = _feature(dict(name="top", part="p", at=top, params=["a"], text="t"), {"p": part}, SimpleNamespace(a=3))
+    assert f["point"] == [0, 0, 5] and f["normal"] == [0, 0, 1] and f["params"] == {"a": 3}
+    with pytest.raises(KeyError):
+        _feature(dict(name="x", part="nope", at=(0, 0, 0)), {"p": part}, SimpleNamespace())
