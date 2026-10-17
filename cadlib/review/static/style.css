@@ -40,6 +40,7 @@ button { font: inherit; color: var(--ink); background: transparent; border: 0; b
 button:hover:not(:disabled) { background: rgba(127,127,127,.15); }
 button.on, button.on:hover:not(:disabled) { background: var(--ink); color: var(--panel); }
 button:disabled { opacity: .45; cursor: default; }
+kbd { font: 10px ui-monospace, monospace; padding: 0 3px; border: 1px solid currentColor; border-radius: 3px; opacity: .6; }
 select { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 4px; }
 #sec-pos { width: 120px; }
 #banner { position: absolute; top: 52px; left: 50%; transform: translateX(-50%); z-index: 3; background: var(--ink);

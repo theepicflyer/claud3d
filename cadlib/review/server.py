@@ -28,6 +28,11 @@ def _mtime(p: Path) -> float:
     return p.stat().st_mtime if p.exists() else 0.0
 
 
+def app_version() -> str:
+    """Changes whenever the viewer's own files change, so open tabs reload themselves."""
+    return f"{max(_mtime(f) for f in STATIC.rglob('*') if f.is_file()):.3f}"
+
+
 class ReviewServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
@@ -90,7 +95,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/state":
             self._json(self.server.state())
         elif path == "/api/version":
-            self._json({"project": self.server.project.name, "version": self.server.version()})
+            self._json({"project": self.server.project.name, "version": self.server.version(), "app": app_version()})
         else:
             self._send(404, b"not found", "text/plain")
 
