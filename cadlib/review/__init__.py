@@ -99,8 +99,14 @@ def format_thread(project: Path, t: dict) -> str:
     if not a:
         where = "general comment on the view in the screenshot"
     elif a["kind"] == "measure":
-        where = (f"measured {a['distance']:.2f} mm from [{a['part']}] {_fmt_vec(a['point'])} to [{a['part_b']}] "
-                 f"{_fmt_vec(a['point_b'])}, delta {_fmt_vec(a['delta'])} in {a.get('view', '?')} view frame")
+        snap_a = f" {a['snap_a']}" if a.get("snap_a") else ""
+        snap_b = f" {a['snap_b']}" if a.get("snap_b") else ""
+        where = (f"measured {a['distance']:.2f} mm from [{a['part']}]{snap_a} {_fmt_vec(a['point'])} to [{a['part_b']}]"
+                 f"{snap_b} {_fmt_vec(a['point_b'])}, delta {_fmt_vec(a['delta'])} in {a.get('view', '?')} view frame")
+        if a.get("axis"):
+            where += f", along {a['axis']}"
+        if a.get("face_distance") is not None:
+            where += f", face to face {a['face_distance']:.2f} mm"
     elif a["kind"] == "circle":
         others = [p for p in a.get("parts", []) if p != a["part"]]
         where = f"[{a['part']}] circle r={a['radius']:.1f} mm at {_fmt_vec(a['point'])}"
@@ -108,6 +114,8 @@ def format_thread(project: Path, t: dict) -> str:
             where += f" (also touches {', '.join(others)})"
     else:
         where = f"[{a['part']}] point {_fmt_vec(a['point'])}"
+    if a and a.get("feature"):
+        where += f" near feature '{a['feature']}'"
     if a and a["kind"] != "measure":
         where += f" normal {_fmt_vec(a['normal'])}, seen in {a.get('view', '?')} view"
     b = t.get("build") or {}

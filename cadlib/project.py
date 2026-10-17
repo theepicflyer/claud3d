@@ -17,6 +17,7 @@ from build123d import Pos, Shape, export_step
 
 from . import bambu, checks, render
 from .config import ROOT, Settings, load_settings
+from .topology import topology
 
 
 @dataclass
@@ -149,7 +150,8 @@ def run_build(project: Path, overrides: dict | None = None, do_render: bool = Tr
                 res.files.append(res.slice.project_3mf)
 
     write_report(res, p, s)
-    write_view(res, s, meshes, asm)
+    feats = [_feature(f, parts, p) for f in mod.features(p, s, parts)] if hasattr(mod, "features") else []
+    write_view(res, s, meshes, asm, parts, feats, p)
     log(f"done in {time.time() - t0:.1f}s")
     return res
 
@@ -175,8 +177,29 @@ def _git_info(project: Path) -> dict:
     return {"commit": git("rev-parse", "--short", "HEAD"), "dirty": bool(git("status", "--porcelain"))}
 
 
-def write_view(res: BuildResult, s: Settings, meshes: dict, asm: dict) -> Path:
-    """Describe the build for the review app: part STLs, plate offsets, assembly transforms, report summary."""
+def _feature(f: dict, parts: dict, p: SimpleNamespace) -> dict:
+    """Normalize a model's feature callout: `at` may be a point, a Vector, or a face/edge (its center is used)."""
+    if f["part"] not in parts:
+        raise KeyError(f"feature {f['name']!r} refers to unknown part {f['part']!r}")
+    at, normal = f["at"], f.get("normal")
+    if isinstance(at, Shape):
+        if normal is None and hasattr(at, "normal_at") and at.geom_type.name == "PLANE":
+            normal = at.normal_at()
+        at = at.center()
+    vec = lambda v: [round(float(c), 4) for c in (tuple(v) if not hasattr(v, "X") else (v.X, v.Y, v.Z))]
+    out = {"name": f["name"], "part": f["part"], "point": vec(at), "text": f.get("text", ""),
+           "params": {k: getattr(p, k) for k in f.get("params", [])}}
+    if normal is not None:
+        out["normal"] = vec(normal)
+    if f.get("view"):
+        out["view"] = f["view"]
+    return out
+
+
+def write_view(res: BuildResult, s: Settings, meshes: dict, asm: dict, shapes: dict | None = None,
+               features: list | None = None, p: SimpleNamespace | None = None) -> Path:
+    """Describe the build for the review app: part STLs and topology, plate offsets, assembly transforms,
+    feature callouts, parameters and a report summary."""
     out = res.project / "out"
     placed = place_on_plate(meshes, s) or {}
     parts, x = {}, 0.0
@@ -187,6 +210,9 @@ def write_view(res: BuildResult, s: Settings, meshes: dict, asm: dict) -> Path:
             offset = [x - m.bounds[0][0], 0.0, 0.0]
             x += m.extents[0] + 10
         parts[name] = {"stl": f"{name}.stl", "plate_offset": offset, "bbox": m.extents.round(2).tolist()}
+        if shapes and name in shapes:
+            (out / f"{name}.topo.json").write_text(json.dumps(topology(shapes[name])))
+            parts[name]["topo"] = f"{name}.topo.json"
     assembly = {}
     asm_dir = out / "assembly"
     for name, shape in asm.items():
@@ -210,6 +236,8 @@ def write_view(res: BuildResult, s: Settings, meshes: dict, asm: dict) -> Path:
         "plate": {"nozzles": [{"name": z.name, "x": z.x, "y": z.y, "height": z.height} for z in s.nozzles]},
         "report": rep,
         "spec": [vars(f) for f in res.spec_findings],
+        "features": features or [],
+        "params": {k: v for k, v in vars(p).items()} if p else {},
     }
     path = out / "view.json"
     path.write_text(json.dumps(view, indent=1))

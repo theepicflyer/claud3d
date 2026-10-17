@@ -1,5 +1,7 @@
 """Parametric storage box with a friction-fit lid."""
 
+import math
+
 from build123d import Axis, Box, Cylinder, GeomType, Pos, RectangleRounded, Rot, chamfer, extrude, fillet
 
 from cadlib.features import elephant_foot_chamfer
@@ -99,3 +101,33 @@ def check(p, s, parts):
     notch_bottom = p.floor + p.inner_z - dip
     yield notch_bottom >= lip_bottom + 0.2, \
         f"R4 scallop bottom z={notch_bottom:.2f} sits {notch_bottom - lip_bottom:.2f} mm above where the lip's face ends (z={lip_bottom:.2f})"
+
+
+def features(p, s, parts):
+    ox, oy = p.inner_x + 2 * p.wall, p.inner_y + 2 * p.wall
+    height = p.floor + p.inner_z
+    gap = s.clearance(p.fit) / 2
+    ly = p.inner_y - 2 * gap
+    c45 = math.cos(math.pi / 4)
+    yield dict(name="floor", part="box", at=(0, 0, p.floor), normal=(0, 0, 1), params=["floor", "inner_x", "inner_y", "inner_z"],
+               text="Bottom of the cavity. The cavity above it is inner_x x inner_y x inner_z.")
+    yield dict(name="wall", part="box", at=(0, -oy / 2, height / 2), normal=(0, -1, 0), params=["wall"],
+               text="Side walls, the same thickness all round.")
+    yield dict(name="corner radius", part="box", normal=(c45, -c45, 0), params=["corner_r"],
+               at=(ox / 2 - p.corner_r * (1 - c45), -oy / 2 + p.corner_r * (1 - c45), height / 2),
+               text="Rounded vertical corners. The lid's outline uses the same radius so the two line up.")
+    yield dict(name="rim", part="box", at=(-ox / 2 + p.wall / 2, 0, height), normal=(0, 0, 1), params=["wall"],
+               text="Top edge of the walls. The lid plate rests on it.")
+    yield dict(name="finger scallop", part="box", at=(ox / 2, 0, height - p.scallop_d), normal=(1, 0, 0),
+               params=["scallop_w", "scallop_d", "scallop_round"], view="assembly",
+               text="Shallow notch in the +X rim that exposes the lid's edge so a fingertip can lift it.")
+    yield dict(name="elephant-foot chamfer", part="box", at=(0, -oy / 2 + 0.2, 0.2), normal=(0, -1, -1),
+               text="0.4 mm chamfer on the edges touching the bed, so first-layer squish doesn't flare the outline.")
+    yield dict(name="lid plate", part="lid", at=(0, oy / 2 - p.wall / 2, p.lid_t), normal=(0, 0, 1), params=["lid_t"],
+               text="Printed face down on the bed; this face is the underside when the lid is on.")
+    yield dict(name="lip", part="lid", at=(0, -ly / 2, p.lid_t + p.lip_h / 2), normal=(0, -1, 0),
+               params=["lip_h", "lip_wall", "fit"],
+               text=f"Friction-fit lip that drops into the box. {gap:.2f} mm gap per side ('{p.fit}' fit for {s.material.key}).")
+    yield dict(name="lead-in chamfer", part="lid", at=(0, -ly / 2 + p.lead_in / 2, p.lid_t + p.lip_h - p.lead_in / 2),
+               normal=(0, -1, 1), params=["lead_in"],
+               text="Chamfer on the lip's tip that guides the lid into the opening.")

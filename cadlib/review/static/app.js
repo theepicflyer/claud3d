@@ -3,7 +3,8 @@ import { OrbitControls } from '/static/vendor/OrbitControls.js';
 import { STLLoader } from '/static/vendor/STLLoader.js';
 
 const PALETTE = [0x5a8cdc, 0xeb963c, 0x6eb96e, 0xd25a6e, 0xa078c8, 0x78bec8];
-const COLORS = { draft: 0xd9731a, open: 0x2f6fd6, resolved: 0x8a8a8f, measure: 0x222222 };
+const COLORS = { draft: 0xd9731a, open: 0x2f6fd6, resolved: 0x8a8a8f, measure: 0x222222, feature: 0x139c8c };
+const AXIS_COLORS = { x: 0xd23c3c, y: 0x2e9b45, z: 0x2f6fd6 };
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = (v) => '(' + v.map((x) => x.toFixed(1)).join(', ') + ')';
@@ -14,7 +15,10 @@ const state = {
   parts: {},          // key -> {name, key, group, front, back, edges, color, frame, visible}
   drafts: [],         // {key, anchor, camera, text, screenshot}
   replies: {},        // thread id -> {text, status}
-  measure: null,      // {a, b} hits while measuring
+  measure: null,      // {a, b} snapped picks while measuring
+  hoverSnap: null,
+  showFeatures: true,
+  tour: null,         // index of the feature being shown in the walkthrough
   focus: null,
 };
 
@@ -74,7 +78,7 @@ function sceneSize() {
 // ---------- parts ----------
 function clipList() { return section.axis ? [clipPlane] : []; }
 
-function makePart(name, key, geom, color, frame) {
+function makePart(name, key, geom, color, frame, topo) {
   const group = new THREE.Group();
   group.matrixAutoUpdate = false;
   const front = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({
@@ -82,12 +86,15 @@ function makePart(name, key, geom, color, frame) {
     polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1, clippingPlanes: clipList() }));
   const back = new THREE.Mesh(geom, new THREE.MeshBasicMaterial({
     color: new THREE.Color(color).multiplyScalar(0.45), side: THREE.BackSide, clippingPlanes: clipList() }));
-  const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geom, 30),
-    new THREE.LineBasicMaterial({ color: 0x1a1a1a, transparent: true, opacity: 0.55, clippingPlanes: clipList() }));
+  // Outline the exact B-rep edges when the build exported them; fall back to mesh crease edges.
+  const edgeGeom = topo ? new THREE.BufferGeometry().setFromPoints(topo.segs.flatMap((sg) => [sg.a, sg.b]))
+    : new THREE.EdgesGeometry(geom, 30);
+  const edges = new THREE.LineSegments(edgeGeom,
+    new THREE.LineBasicMaterial({ color: 0x1a1a1a, transparent: true, opacity: 0.6, clippingPlanes: clipList() }));
   front.userData.partKey = key;
   group.add(front, back, edges);
   world.add(group);
-  return { name, key, group, front, back, edges, color, frame, visible: true };
+  return { name, key, group, front, back, edges, color, frame, visible: true, topo, worldTopo: null };
 }
 
 function disposePart(p) {
@@ -105,7 +112,11 @@ async function loadParts(view) {
   let i = 0;
   for (const [name, info] of Object.entries(view.parts)) {
     const geom = await loader.loadAsync(`/out/${info.stl}?v=${v}`);
-    state.parts[name] = makePart(name, name, geom, PALETTE[i++ % PALETTE.length], 'part');
+    let topo = null;
+    if (info.topo) {
+      try { topo = prepTopo(await (await fetch(`/out/${info.topo}?v=${v}`)).json()); } catch { topo = null; }
+    }
+    state.parts[name] = makePart(name, name, geom, PALETTE[i++ % PALETTE.length], 'part', topo);
   }
   for (const [name, a] of Object.entries(view.assembly || {})) {
     if (!a.stl) continue;
@@ -142,6 +153,7 @@ function applyLayout() {
     p.group.visible = shown && p.visible;
   }
   scene.updateMatrixWorld(true);
+  Object.values(state.parts).forEach(refreshWorldTopo);
   buildHelpers();
   rebuildMarkers();
   updateSectionRange();
@@ -190,6 +202,134 @@ function buildHelpers() {
     grid.material.opacity = 0.25;
     helpers.add(grid);
   }
+}
+
+// ---------- topology & snapping ----------
+const V3 = (a) => new THREE.Vector3(a[0], a[1], a[2]);
+function prepTopo(t) {
+  const pts = [];
+  const segs = [];
+  for (const v of t.vertices) pts.push({ kind: 'vertex', p: V3(v) });
+  for (const e of t.edges) {
+    if (e.t === 'line') {
+      const a = V3(e.a), b = V3(e.b);
+      pts.push({ kind: 'midpoint', p: a.clone().add(b).multiplyScalar(0.5), info: { len: e.len } });
+      segs.push({ a, b, edge: e });
+    } else {
+      const ps = e.pts.map(V3);
+      for (let k = 0; k < ps.length - 1; k++) segs.push({ a: ps[k], b: ps[k + 1], edge: e });
+      if (e.t === 'circle') pts.push({ kind: 'center', p: V3(e.c), info: { r: e.r, full: e.full } });
+    }
+  }
+  const planes = t.faces.filter((f) => f.t === 'plane').map((f) => ({ n: V3(f.n), d: f.d }));
+  const cyls = t.faces.filter((f) => f.t === 'cyl').map((f) => ({ o: V3(f.o), dir: V3(f.dir).normalize(), r: f.r }));
+  return { pts, segs, planes, cyls };
+}
+function refreshWorldTopo(p) {
+  if (!p.topo) return;
+  const M = p.group.matrixWorld;
+  p.worldTopo = {
+    pts: p.topo.pts.map((c) => ({ ...c, w: c.p.clone().applyMatrix4(M) })),
+    segs: p.topo.segs.map((sg) => ({ ...sg, wa: sg.a.clone().applyMatrix4(M), wb: sg.b.clone().applyMatrix4(M) })),
+  };
+}
+
+const SNAP_PX = { vertex: 12, center: 12, midpoint: 10, edge: 8 };
+const SNAP_RANK = { vertex: 0, center: 1, midpoint: 2, edge: 3, face: 4 };
+function toScreen(w) {
+  const r = canvas.getBoundingClientRect();
+  const p = w.clone().project(camera);
+  return { x: r.left + (p.x + 1) / 2 * r.width, y: r.top + (1 - p.y) / 2 * r.height, behind: p.z > 1 };
+}
+function visibleParts() { return Object.values(state.parts).filter((p) => p.group.visible); }
+function unoccluded(w) {
+  const dir = w.clone().sub(camera.position);
+  const dist = dir.length();
+  raycaster.set(camera.position, dir.normalize());
+  for (const hit of raycaster.intersectObjects(visibleParts().map((p) => p.front), false)) {
+    if (section.axis && clipPlane.distanceToPoint(hit.point) < 0) continue;
+    return hit.distance > dist - Math.max(0.05, dist * 0.002);
+  }
+  return true;
+}
+function faceInfo(part, local, normal) {
+  if (!part.topo) return null;
+  for (const pl of part.topo.planes) {
+    if (pl.n.dot(normal) > 0.995 && Math.abs(pl.n.dot(local) - pl.d) < 0.02) return { type: 'plane', n: pl.n.clone() };
+  }
+  for (const c of part.topo.cyls) {
+    const v = local.clone().sub(c.o);
+    const radial = v.sub(c.dir.clone().multiplyScalar(v.dot(c.dir))).length();
+    if (Math.abs(radial - c.r) < Math.max(0.05, c.r * 0.01)) return { type: 'cylinder', r: c.r };
+  }
+  return null;
+}
+function hitResult(kind, part, world, extra = {}) {
+  return { kind, part, world, local: part.group.worldToLocal(world.clone()), ...extra };
+}
+// Best snap under the cursor: vertex > circle center > edge midpoint > nearest point on an edge > face.
+function snapAt(x, y) {
+  const raw = pick(x, y);
+  const cands = [];
+  for (const part of visibleParts()) {
+    for (const c of part.worldTopo?.pts || []) {
+      if (section.axis && clipPlane.distanceToPoint(c.w) < -1e-6) continue;
+      const sc = toScreen(c.w);
+      if (sc.behind) continue;
+      const d = Math.hypot(sc.x - x, sc.y - y);
+      if (d <= SNAP_PX[c.kind]) cands.push({ c, part, d });
+    }
+  }
+  cands.sort((a, b) => SNAP_RANK[a.c.kind] - SNAP_RANK[b.c.kind] || a.d - b.d);
+  for (const { c, part } of cands.slice(0, 8)) {
+    if (unoccluded(c.w)) return hitResult(c.kind, part, c.w.clone(), { info: c.info });
+  }
+  raycaster.setFromCamera(ndc(x, y), camera);
+  const ray = raycaster.ray.clone();
+  let best = null;
+  for (const part of visibleParts()) {
+    for (const sg of part.worldTopo?.segs || []) {
+      const sa = toScreen(sg.wa), sb = toScreen(sg.wb);
+      if (sa.behind || sb.behind) continue;
+      const vx = sb.x - sa.x, vy = sb.y - sa.y;
+      const t = Math.max(0, Math.min(1, ((x - sa.x) * vx + (y - sa.y) * vy) / (vx * vx + vy * vy || 1)));
+      const d = Math.hypot(sa.x + t * vx - x, sa.y + t * vy - y);
+      if (d <= SNAP_PX.edge && (!best || d < best.d)) best = { sg, part, d };
+    }
+  }
+  if (best) {
+    const onSeg = new THREE.Vector3();
+    ray.distanceSqToSegment(best.sg.wa, best.sg.wb, undefined, onSeg);
+    if ((!section.axis || clipPlane.distanceToPoint(onSeg) >= -1e-6) && unoccluded(onSeg)) {
+      const e = best.sg.edge;
+      return hitResult('edge', best.part, onSeg, { info: e.t === 'circle' ? { r: e.r } : e.t === 'line' ? { len: e.len } : {} });
+    }
+  }
+  if (!raw) return null;
+  return { ...raw, kind: 'face', face: faceInfo(raw.part, raw.local, raw.normal) };
+}
+function snapLabel(sn) {
+  if (!sn) return '';
+  const dia = sn.info?.r ? ` ⌀${(sn.info.r * 2).toFixed(2)}` : '';
+  if (sn.kind === 'face') {
+    if (sn.face?.type === 'cylinder') return `cylinder ⌀${(sn.face.r * 2).toFixed(2)}`;
+    return sn.face?.type === 'plane' ? 'flat face' : 'face';
+  }
+  if (sn.kind === 'edge') return `edge${dia}${sn.info?.len ? ` (${sn.info.len.toFixed(2)} long)` : ''}`;
+  if (sn.kind === 'midpoint') return `midpoint (edge ${sn.info.len.toFixed(2)})`;
+  if (sn.kind === 'center') return `center${dia}`;
+  return sn.kind;
+}
+function showSnap(sn) {
+  const el = $('snap');
+  if (!sn || sn.kind === 'face') { el.hidden = true; return; }
+  const r = stage.getBoundingClientRect();
+  const sc = toScreen(sn.world);
+  el.hidden = false;
+  el.className = `snap ${sn.kind}`;
+  el.style.left = `${sc.x - r.left}px`;
+  el.style.top = `${sc.y - r.top}px`;
+  el.dataset.label = snapLabel(sn);
 }
 
 // ---------- camera ----------
@@ -354,16 +494,90 @@ function rebuildMarkers() {
   state.drafts.forEach((d, i) => {
     if (d.anchor) place(d.anchor, COLORS.draft, `new ${i + 1}`, 'draft', () => focusCard(d.key), d.key);
   });
-  if (state.measure?.b) {
-    placeMeasure(measureAnchor(state.measure), `${state.measure.dist.toFixed(2)} mm`, 'measure');
-  } else if (state.measure?.a) {
-    const w = state.measure.a.world;
-    const dot = new THREE.Mesh(DOT, new THREE.MeshBasicMaterial({ color: COLORS.measure, depthTest: false }));
-    dot.userData.screenDot = 0.8;
-    dot.position.copy(w);
-    dot.renderOrder = 10;
-    measureGroup.add(dot);
+  drawLiveMeasure();
+  placeFeatures();
+}
+
+const liveMeasure = new THREE.Group();
+scene.add(liveMeasure);
+function measureDot(w) {
+  const dot = new THREE.Mesh(DOT, new THREE.MeshBasicMaterial({ color: COLORS.measure, depthTest: false }));
+  dot.userData.screenDot = 0.8;
+  dot.position.copy(w);
+  dot.renderOrder = 11;
+  return dot;
+}
+// The in-progress or finished measurement: dots, main line, colour-coded axis legs.
+function drawLiveMeasure() {
+  liveMeasure.clear();
+  const m = state.measure;
+  if (!m?.a) { renderReadout(); return; }
+  liveMeasure.add(measureDot(m.a.world));
+  const b = m.b || (state.hoverSnap && state.mode === 'measure' ? state.hoverSnap : null);
+  if (b) liveMeasure.add(measureDot(b.world));
+  renderReadout();
+}
+
+// Measurement lines are drawn in screen space each frame so they stay thick and readable at any zoom.
+function drawMeasureOverlay() {
+  if (lasso) return;
+  octx.clearRect(0, 0, overlay.width, overlay.height);
+  const m = state.measure;
+  const b = m?.b || (m?.a && state.mode === 'measure' ? state.hoverSnap : null);
+  if (!m?.a || !b) return;
+  const px = devicePixelRatio;
+  const r = canvas.getBoundingClientRect();
+  const scr = (w) => { const p = w.clone().project(camera); return [(p.x + 1) / 2 * r.width * px, (1 - p.y) / 2 * r.height * px, p.z > 1]; };
+  const A = m.a.world, B = b.world;
+  const p1 = new THREE.Vector3(B.x, A.y, A.z), p2 = new THREE.Vector3(B.x, B.y, A.z);
+  const legs = [[A, p1, '#d23c3c', B.x - A.x], [p1, p2, '#2e9b45', B.y - A.y], [p2, B, '#2f6fd6', B.z - A.z]];
+  const tag = (x, y, text, bg) => {
+    octx.font = `600 ${11 * px}px ui-monospace, monospace`;
+    const w = octx.measureText(text).width + 8 * px, h = 15 * px;
+    octx.fillStyle = bg;
+    octx.beginPath();
+    octx.roundRect(x - w / 2, y - h / 2, w, h, 4 * px);
+    octx.fill();
+    octx.fillStyle = '#fff';
+    octx.textAlign = 'center';
+    octx.textBaseline = 'middle';
+    octx.fillText(text, x, y + 0.5 * px);
+  };
+  octx.setLineDash([6 * px, 4 * px]);
+  octx.lineWidth = 2 * px;
+  for (const [u, v, col, d] of legs) {
+    if (Math.abs(d) < 1e-4) continue;
+    const [x0, y0, b0] = scr(u), [x1, y1, b1] = scr(v);
+    if (b0 || b1) continue;
+    octx.strokeStyle = col;
+    octx.beginPath(); octx.moveTo(x0, y0); octx.lineTo(x1, y1); octx.stroke();
+    if (m.b && Math.hypot(x1 - x0, y1 - y0) > 40 * px) tag((x0 + x1) / 2, (y0 + y1) / 2, num(d), col);
   }
+  octx.setLineDash([]);
+  const [ax, ay, ab] = scr(A), [bx, by, bb] = scr(B);
+  if (ab || bb) return;
+  octx.lineWidth = 3 * px;
+  octx.strokeStyle = 'rgba(255,255,255,.9)';
+  octx.beginPath(); octx.moveTo(ax, ay); octx.lineTo(bx, by); octx.stroke();
+  octx.lineWidth = 1.8 * px;
+  octx.strokeStyle = '#1d1d1f';
+  octx.beginPath(); octx.moveTo(ax, ay); octx.lineTo(bx, by); octx.stroke();
+  tag((ax + bx) / 2, (ay + by) / 2, `${A.distanceTo(B).toFixed(2)} mm`, '#1d1d1f');
+}
+
+function measureResult(a, b) {
+  const delta = b.world.clone().sub(a.world);
+  const dist = delta.length();
+  const comps = { X: delta.x, Y: delta.y, Z: delta.z };
+  const axis = Object.entries(comps).find(([, v]) => dist > 1e-6 && Math.abs(v) / dist > 0.9995)?.[0] || null;
+  let faceDist = null;
+  if (a.face?.type === 'plane' && b.face?.type === 'plane') {
+    const na = a.face.n.clone().transformDirection(a.part.group.matrixWorld);
+    const nb = b.face.n.clone().transformDirection(b.part.group.matrixWorld);
+    if (Math.abs(na.dot(nb)) > 0.9995) faceDist = Math.abs(na.dot(delta));
+  }
+  const dia = (sn) => (sn.info?.r ? sn.info.r * 2 : sn.face?.type === 'cylinder' ? sn.face.r * 2 : null);
+  return { delta, dist, axis, faceDist, diaA: dia(a), diaB: dia(b) };
 }
 
 function placeMeasure(a, text, cls, onClick, key) {
@@ -381,16 +595,90 @@ function placeMeasure(a, text, cls, onClick, key) {
 }
 
 function measureAnchor(m) {
-  return {
+  const r = measureResult(m.a, m.b);
+  const out = {
     kind: 'measure', part: m.a.part.name, frame: m.a.part.frame, point: m.a.local.toArray().map(round3),
-    normal: m.a.normal.toArray().map(round3), part_b: m.b.part.name, frame_b: m.b.part.frame,
-    point_b: m.b.local.toArray().map(round3), distance: round3(m.dist),
-    delta: m.b.world.clone().sub(m.a.world).toArray().map(round3), view: state.layout,
+    normal: (m.a.normal || new THREE.Vector3()).toArray().map(round3), part_b: m.b.part.name, frame_b: m.b.part.frame,
+    point_b: m.b.local.toArray().map(round3), distance: round3(r.dist), delta: r.delta.toArray().map(round3),
+    snap_a: snapLabel(m.a), snap_b: snapLabel(m.b), view: state.layout,
   };
+  if (r.axis) out.axis = r.axis;
+  if (r.faceDist !== null) out.face_distance = round3(r.faceDist);
+  return out;
 }
 
+// ---------- readout panel & axis triad ----------
+const num = (v) => (Math.abs(v) < 0.005 ? '0.00' : v.toFixed(2));
+function renderReadout() {
+  const sn = state.hoverSnap;
+  const cur = $('cursor-out');
+  if (sn) {
+    const [x, y, z] = sn.local.toArray();
+    cur.innerHTML = `<span class="what">${esc(sn.part.name)} · ${esc(snapLabel(sn))}</span>
+      <span class="ax x">X <b>${num(x)}</b></span><span class="ax y">Y <b>${num(y)}</b></span><span class="ax z">Z <b>${num(z)}</b></span>`;
+  } else {
+    cur.innerHTML = '<span class="what muted">Hover the model for coordinates (part frame, mm)</span>';
+  }
+  const m = state.measure;
+  const out = $('measure-out');
+  const b = m?.b || (m?.a && state.mode === 'measure' ? state.hoverSnap : null);
+  if (!m?.a) { out.hidden = true; return; }
+  out.hidden = false;
+  if (!b) {
+    out.innerHTML = `<div class="muted">From ${esc(m.a.part.name)} · ${esc(snapLabel(m.a))}. Click a second point.</div>`;
+    return;
+  }
+  const r = measureResult(m.a, b);
+  const frame = state.layout === 'print' ? 'plate frame (same axes as each part)' : 'assembly frame';
+  out.innerHTML = `
+    <div class="dist">${r.dist.toFixed(2)} <small>mm</small>${r.axis ? ` <span class="along ${r.axis.toLowerCase()}">along ${r.axis}</span>` : ''}</div>
+    <div class="deltas"><span class="ax x">ΔX <b>${num(r.delta.x)}</b></span><span class="ax y">ΔY <b>${num(r.delta.y)}</b></span><span class="ax z">ΔZ <b>${num(r.delta.z)}</b></span></div>
+    ${r.faceDist !== null ? `<div>Face to face <b>${r.faceDist.toFixed(2)} mm</b></div>` : ''}
+    ${r.diaA ? `<div>A ⌀ <b>${r.diaA.toFixed(2)}</b> (r ${(r.diaA / 2).toFixed(2)})</div>` : ''}
+    ${r.diaB ? `<div>B ⌀ <b>${r.diaB.toFixed(2)}</b> (r ${(r.diaB / 2).toFixed(2)})</div>` : ''}
+    <div class="muted small">A ${esc(m.a.part.name)} · ${esc(snapLabel(m.a))}<br>B ${esc(b.part.name)} · ${esc(snapLabel(b))}<br>Δ in ${frame}</div>
+    ${m.b ? '<div class="btns"><button id="measure-comment">Comment on measurement</button><button id="measure-clear">Clear</button></div>' : ''}`;
+  if (m.b) {
+    $('measure-comment').addEventListener('click', () => {
+      createDraft(measureAnchor(state.measure), null, true);
+      state.measure = null;
+      drawLiveMeasure();
+    });
+    $('measure-clear').addEventListener('click', () => { state.measure = null; drawLiveMeasure(); });
+  }
+}
+
+const triad = $('triad');
+const tctx = triad.getContext('2d');
+function drawTriad() {
+  const s = 92 * devicePixelRatio;
+  if (triad.width !== s) { triad.width = s; triad.height = s; }
+  tctx.clearRect(0, 0, s, s);
+  const q = camera.quaternion.clone().invert();
+  const c = s / 2, len = s * 0.33;
+  const axes = [['X', new THREE.Vector3(1, 0, 0), '#d23c3c'], ['Y', new THREE.Vector3(0, 1, 0), '#2e9b45'], ['Z', new THREE.Vector3(0, 0, 1), '#2f6fd6']]
+    .map(([n, v, col]) => [n, v.applyQuaternion(q), col]).sort((a, b) => a[1].z - b[1].z);
+  tctx.lineWidth = 2.5 * devicePixelRatio;
+  tctx.font = `700 ${12 * devicePixelRatio}px system-ui, sans-serif`;
+  tctx.textAlign = 'center';
+  tctx.textBaseline = 'middle';
+  for (const [n, v, col] of axes) {
+    tctx.strokeStyle = col;
+    tctx.fillStyle = col;
+    tctx.globalAlpha = v.z < -0.2 ? 0.45 : 1;
+    tctx.beginPath();
+    tctx.moveTo(c, c);
+    tctx.lineTo(c + v.x * len, c - v.y * len);
+    tctx.stroke();
+    tctx.fillText(n, c + v.x * (len + 11 * devicePixelRatio), c - v.y * (len + 11 * devicePixelRatio));
+  }
+  tctx.globalAlpha = 1;
+}
+
+let labelFrame = 0;
 function updateLabels() {
   const r = canvas.getBoundingClientRect();
+  const checkOcclusion = (labelFrame++ % 4) === 0;
   for (const l of labels) {
     const w = l.world();
     if (!w) { l.el.style.display = 'none'; continue; }
@@ -398,6 +686,7 @@ function updateLabels() {
     const p = w.project(camera);
     if (p.z > 1) { l.el.style.display = 'none'; continue; }
     l.el.style.display = '';
+    if (checkOcclusion) l.el.classList.toggle('occluded', !unoccluded(w.clone().unproject(camera)));
     l.el.style.left = `${(p.x + 1) / 2 * r.width}px`;
     l.el.style.top = `${(1 - p.y) / 2 * r.height}px`;
   }
@@ -414,14 +703,15 @@ function setMode(mode) {
 function cancelGesture() {
   lasso = null;
   octx.clearRect(0, 0, overlay.width, overlay.height);
-  if (state.measure) { state.measure = null; rebuildMarkers(); }
+  if (state.measure) { state.measure = null; drawLiveMeasure(); }
+  showSnap(null);
   setHint();
 }
 const NAV = 'Right-drag pan · Ctrl+right-drag or middle-drag rotate · wheel zoom';
 const HINTS = {
   pin: `Click the model to pin a comment. ${NAV}`,
   circle: `Drag a loop around an area to comment on it. ${NAV}`,
-  measure: `Click two points to measure between them. ${NAV}`,
+  measure: `Click two points to measure. Snaps to vertices, circle centers, edge midpoints and edges; hold Ctrl to place freely. ${NAV}`,
 };
 function setHint(html) { $('hint').innerHTML = html ?? HINTS[state.mode]; $('hint').style.pointerEvents = html ? 'auto' : 'none'; }
 
@@ -449,18 +739,25 @@ canvas.addEventListener('pointerup', (e) => {
     const hit = pick(e.clientX, e.clientY);
     if (hit) createDraft({ kind: 'point', ...anchorBase(hit) });
   } else if (state.mode === 'measure') {
-    measureClick(e.clientX, e.clientY);
+    measureClick(e.clientX, e.clientY, e.ctrlKey);
   }
 });
 
 let hoverQueued = false;
+let ctrlHeld = false;
+window.addEventListener('keydown', (e) => { if (e.key === 'Control') ctrlHeld = true; });
+window.addEventListener('keyup', (e) => { if (e.key === 'Control') ctrlHeld = false; });
 function hoverAt(x, y) {
   if (hoverQueued) return;
   hoverQueued = true;
   requestAnimationFrame(() => {
     hoverQueued = false;
-    const hit = pick(x, y);
-    $('hover').textContent = hit ? `${hit.part.name}  ${fmt(hit.local.toArray())} mm  (part frame)` : '';
+    const sn = state.mode === 'measure' && !ctrlHeld ? snapAt(x, y) : pick(x, y);
+    if (sn && !sn.kind) { sn.kind = 'face'; sn.face = faceInfo(sn.part, sn.local, sn.normal); }
+    state.hoverSnap = sn;
+    showSnap(state.mode === 'measure' ? sn : null);
+    if (state.measure?.a && !state.measure.b) drawLiveMeasure();
+    else renderReadout();
   });
 }
 
@@ -521,25 +818,13 @@ function finishLasso() {
   }, path);
 }
 
-function measureClick(x, y) {
-  const hit = pick(x, y);
+function measureClick(x, y, free) {
+  const hit = free ? pick(x, y) : snapAt(x, y);
   if (!hit) return;
-  if (!state.measure || state.measure.b) {
-    state.measure = { a: hit };
-    setHint('Click a second point.');
-  } else {
-    state.measure.b = hit;
-    state.measure.dist = hit.world.distanceTo(state.measure.a.world);
-    const d = hit.world.clone().sub(state.measure.a.world);
-    setHint(`<b>${state.measure.dist.toFixed(2)} mm</b> &nbsp;dx ${d.x.toFixed(2)} dy ${d.y.toFixed(2)} dz ${d.z.toFixed(2)} (${state.layout} frame) &nbsp;<button id="measure-comment" class="link">Comment on this</button>`);
-    $('measure-comment').addEventListener('click', () => {
-      const a = measureAnchor(state.measure);
-      state.measure = null;
-      setHint();
-      createDraft(a);
-    });
-  }
-  rebuildMarkers();
+  if (!hit.kind) { hit.kind = 'face'; hit.face = faceInfo(hit.part, hit.local, hit.normal); }
+  if (!state.measure || state.measure.b) state.measure = { a: hit };
+  else state.measure.b = hit;
+  drawLiveMeasure();
 }
 
 window.addEventListener('keydown', (e) => {
@@ -551,7 +836,9 @@ window.addEventListener('keydown', (e) => {
   const tool = { 1: 'pin', 2: 'circle', 3: 'measure' }[k];
   if (tool) setMode(tool);
   else if (k === 'f') setView('fit');
-  else if (k === 'escape') cancelGesture();
+  else if (k === 'arrowright' && state.tour !== null) tourStep(1);
+  else if (k === 'arrowleft' && state.tour !== null) tourStep(-1);
+  else if (k === 'escape') { if (state.tour !== null) endTour(); else cancelGesture(); }
 });
 document.querySelectorAll('#modes button').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
 document.querySelectorAll('#layouts button').forEach((b) => b.addEventListener('click', () => {
@@ -562,10 +849,15 @@ document.querySelectorAll('#layouts button').forEach((b) => b.addEventListener('
 document.querySelectorAll('#cams button').forEach((b) => b.addEventListener('click', () => setView(b.dataset.cam)));
 
 // ---------- drafts, screenshots ----------
-function snapshot(path, key) {
+function snapshot(path, key, withOverlay) {
   // Show only this comment's marker, labelled "this", so the image can't be confused with thread numbers.
   const others = [];
-  scene.traverse((o) => { if ((o.userData.marker || o.parent === measureGroup) && o.userData.key !== key && o.visible) { o.visible = false; others.push(o); } });
+  scene.traverse((o) => {
+    if ((o.userData.marker || o.parent === measureGroup || o.parent === liveMeasure) && o.userData.key !== key && o.visible) {
+      o.visible = false;
+      others.push(o);
+    }
+  });
   scaleDots();
   renderer.render(scene, camera);
   others.forEach((o) => { o.visible = true; });
@@ -580,6 +872,7 @@ function snapshot(path, key) {
   ctx.drawImage(canvas, 0, 0, c.width, c.height);
   const px = (canvas.width / canvas.clientWidth) * scale;
   const rect = canvas.getBoundingClientRect();
+  if (withOverlay) ctx.drawImage(overlay, 0, 0, c.width, c.height);
   if (path) drawLasso(path, ctx, px, rect);
   ctx.font = `600 ${12 * px}px system-ui, sans-serif`;
   for (const l of labels) {
@@ -597,11 +890,26 @@ function snapshot(path, key) {
   return c.toDataURL('image/png');
 }
 
-function createDraft(anchor, lassoPath) {
+function nearestFeature(anchor) {
+  if (!anchor?.point) return null;
+  const size = state.view?.parts?.[anchor.part]?.bbox;
+  const reach = Math.max(6, size ? Math.hypot(...size) * 0.12 : 6);
+  let best = null;
+  for (const f of state.view?.features || []) {
+    if (f.part !== anchor.part) continue;
+    const d = V3(f.point).distanceTo(V3(anchor.point));
+    if (d <= reach && (!best || d < best.d)) best = { name: f.name, d };
+  }
+  return best?.name || null;
+}
+
+function createDraft(anchor, lassoPath, withOverlay) {
+  const feature = nearestFeature(anchor);
+  if (feature) anchor.feature = feature;
   const d = { key: `d${Date.now()}`, anchor, camera: getCamera(), text: '' };
   state.drafts.push(d);
   rebuildMarkers();
-  d.screenshot = snapshot(lassoPath, d.key);
+  d.screenshot = snapshot(lassoPath, d.key, withOverlay);
   persist();
   renderComments();
   focusCard(d.key, true);
@@ -610,6 +918,8 @@ $('add-general').addEventListener('click', () => createDraft(null));
 
 function anchorText(a) {
   if (!a) return 'general comment on this view';
+  const near = a.feature ? ` (near ${a.feature})` : '';
+  if (a.kind !== 'measure' && near) return `${a.kind === 'circle' ? 'circle' : 'point'} on ${a.part}${near}`;
   if (a.kind === 'measure') return `${a.part} → ${a.part_b}: ${a.distance.toFixed(2)} mm`;
   const where = `${a.part} ${fmt(a.point)}`;
   return a.kind === 'circle' ? `circle r≈${a.radius.toFixed(1)} mm on ${where}` : `point on ${where}`;
@@ -739,6 +1049,7 @@ function renderHeader() {
   }
   for (const f of v?.spec || []) if (f.status !== 'PASS') items.push(`<li><span class="st ${f.status}">${f.status}</span>${esc(f.detail)}</li>`);
   $('report').innerHTML = items.join('') || '<li class="muted">All checks pass.</li>';
+  renderFeatures();
 }
 
 // ---------- state, persistence, polling ----------
@@ -828,12 +1139,109 @@ function restoreView() {
   return false;
 }
 
+let tween = null;
+function flyTo(position, target, ms = 450) {
+  tween = { p0: camera.position.clone(), t0: controls.target.clone(), p1: position, t1: target, start: performance.now(), ms };
+}
+function stepTween() {
+  if (!tween) return;
+  const k = Math.min(1, (performance.now() - tween.start) / tween.ms);
+  const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+  camera.position.lerpVectors(tween.p0, tween.p1, e);
+  controls.target.lerpVectors(tween.t0, tween.t1, e);
+  controls.update();
+  if (k >= 1) tween = null;
+}
+
 function animate() {
   requestAnimationFrame(animate);
+  stepTween();
   scaleDots();
+  drawTriad();
+  drawMeasureOverlay();
   renderer.render(scene, camera);
   updateLabels();
 }
+
+// ---------- feature callouts & walkthrough ----------
+function featureWorld(f) {
+  const part = state.parts[f.part];
+  return part && part.group.visible ? part.group.localToWorld(V3(f.point)) : null;
+}
+function placeFeatures() {
+  if (!state.showFeatures && state.tour === null) return;
+  (state.view?.features || []).forEach((f, i) => {
+    const part = state.parts[f.part];
+    if (!part) return;
+    const dot = new THREE.Mesh(DOT, new THREE.MeshBasicMaterial({ color: COLORS.feature, depthTest: false, transparent: true, clippingPlanes: clipList() }));
+    dot.userData.screenDot = 0.8;
+    dot.userData.marker = true;
+    dot.userData.key = `f${i}`;
+    dot.position.copy(V3(f.point));
+    dot.renderOrder = 9;
+    part.group.add(dot);
+    addLabel(f.name, `feature${state.tour === i ? ' active' : ''}`, () => featureWorld(f), () => showFeature(i), `f${i}`);
+  });
+}
+function renderFeatures() {
+  const feats = state.view?.features || [];
+  $('features-sec').hidden = !feats.length;
+  $('features').innerHTML = feats.map((f, i) => `
+    <li data-i="${i}" class="${state.tour === i ? 'active' : ''}">
+      <div><b>${esc(f.name)}</b> <span class="muted small">${esc(f.part)}</span></div>
+      ${f.text ? `<div class="small">${esc(f.text)}</div>` : ''}
+      ${Object.keys(f.params || {}).length ? `<div class="params">${Object.entries(f.params).map(([k, v]) => `<code>${esc(k)} = ${esc(v)}</code>`).join(' ')}</div>` : ''}
+    </li>`).join('');
+  $('features').querySelectorAll('li').forEach((li) => li.addEventListener('click', () => showFeature(Number(li.dataset.i))));
+  const params = state.view?.params || {};
+  $('params').innerHTML = Object.entries(params).map(([k, v]) => `<code>${esc(k)} = ${esc(v)}</code>`).join(' ');
+}
+function showFeature(i) {
+  const feats = state.view?.features || [];
+  const f = feats[i];
+  if (!f) return;
+  if (f.view && f.view !== state.layout && (f.view === 'print' || state.view?.assembly?.[f.part])) {
+    state.layout = f.view;
+    applyLayout();
+  }
+  const part = state.parts[f.part];
+  if (!part) return;
+  const target = part.group.localToWorld(V3(f.point));
+  const n = f.normal ? V3(f.normal).normalize().transformDirection(part.group.matrixWorld) : new THREE.Vector3(1, -1, 0.8).normalize();
+  const dir = n.clone().multiplyScalar(1.4).add(new THREE.Vector3(0.35, -0.5, 0.55)).normalize();
+  const size = Math.max(25, Math.hypot(...(state.view.parts[f.part]?.bbox || [60, 60, 60])) * 0.7);
+  const dist = size / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
+  flyTo(target.clone().addScaledVector(dir, dist), target);
+  if (state.tour !== null) state.tour = i;
+  renderTour();
+  rebuildMarkers();
+  renderFeatures();
+}
+function startTour() { state.tour = 0; showFeature(0); }
+function endTour() { state.tour = null; renderTour(); rebuildMarkers(); renderFeatures(); }
+function tourStep(d) {
+  const n = (state.view?.features || []).length;
+  if (n) showFeature((state.tour + d + n) % n);
+}
+function renderTour() {
+  const el = $('tour');
+  const f = state.tour !== null ? state.view?.features?.[state.tour] : null;
+  $('hint').hidden = !!f;
+  if (!f) { el.hidden = true; return; }
+  const n = state.view.features.length;
+  el.hidden = false;
+  el.innerHTML = `
+    <div class="head"><span class="muted small">${state.tour + 1} / ${n} · ${esc(f.part)}</span><button id="tour-close" title="Close (Esc)">×</button></div>
+    <div class="name">${esc(f.name)}</div>
+    ${f.text ? `<div>${esc(f.text)}</div>` : ''}
+    ${Object.keys(f.params || {}).length ? `<div class="params">${Object.entries(f.params).map(([k, v]) => `<code>${esc(k)} = ${esc(v)}</code>`).join(' ')}</div>` : ''}
+    <div class="nav"><button id="tour-prev">← Prev</button><button id="tour-next">Next →</button></div>`;
+  $('tour-close').addEventListener('click', endTour);
+  $('tour-prev').addEventListener('click', () => tourStep(-1));
+  $('tour-next').addEventListener('click', () => tourStep(1));
+}
+$('tour-start').addEventListener('click', startTour);
+$('show-features').addEventListener('change', (e) => { state.showFeatures = e.target.checked; rebuildMarkers(); });
 
 resize();
 setMode('pin');
