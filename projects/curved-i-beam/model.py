@@ -1,8 +1,8 @@
 """curved-i-beam: an I-beam bent into a 25° wedge.
 
 The two flanges are the flat end plates, on radii `sweep` degrees apart. The web joins them, and its inner and outer
-edges follow concentric arcs. The I is `inner_arc` tall at the inner edge (measured along the arc, flange face to
-flange face), so the inner radius is inner_arc / angle; the flanges are `flange_len` long, which sets the outer radius.
+edges follow concentric arcs at `inner_r` and inner_r + `flange_len` from the arc centre, so the I is
+inner_r * angle tall at the inner edge (measured along the arc, flange face to flange face).
 Fillets join the web to the flanges. The top flange's underside slopes down toward the web, so it thickens from
 `flange_t` at its edges and no part of it is steeper than `underside_max` from vertical when printed.
 
@@ -16,7 +16,7 @@ import math
 from build123d import Axis, Box, GeomType, Plane, Polygon, Pos, Rectangle, RectangleRounded, Rot, extrude, fillet, revolve
 
 PARAMS = dict(
-    inner_arc=15.0,    # R1 I height at the inner edge, along the arc
+    inner_r=24.38,     # R1 radius of the inner arc
     flange_len=43.0,   # R2 flange length, inner arc to outer arc
     sweep=25.0,        # R3 angle between the two flanges
     flange_w=10.0,     # R4 width of each flange
@@ -33,8 +33,7 @@ SECTIONS = {"beam": ("y", -5.0)}
 
 
 def radii(p):
-    ri = p.inner_arc / math.radians(p.sweep)
-    return ri, ri + p.flange_len
+    return p.inner_r, p.inner_r + p.flange_len
 
 
 def taper(p):
@@ -108,8 +107,8 @@ def features(p, s, parts):
         yield dict(name=f"{which} root fillets", part="beam", at=at, normal=(n[0] - 0.3, -1, n[2]), params=["root_r"],
                    text=f"{p.root_r:g} mm fillets on both sides where the web meets the {which} flange, so the joint "
                         "doesn't split along a layer line.")
-    yield dict(name="inner edge", part="beam", at=_pt(p, ri, p.sweep / 2), normal=(-1, -0.3, -0.3), params=["inner_arc"],
-               text=f"Short curved edge: the I is {p.inner_arc:g} mm tall here along the arc (radius {ri:.1f} mm).")
+    yield dict(name="inner edge", part="beam", at=_pt(p, ri, p.sweep / 2), normal=(-1, -0.3, -0.3), params=["inner_r"],
+               text=f"Short curved edge: radius {ri:.1f} mm, so the I is {ri * math.radians(p.sweep):.1f} mm tall here along the arc.")
     yield dict(name="outer edge", part="beam", at=_pt(p, ro, p.sweep / 2), normal=(1, -0.3, 0.5), params=["flange_len"],
                text=f"Long curved edge: the I is {ro * math.radians(p.sweep):.1f} mm tall here along the arc (radius {ro:.1f} mm), "
                     "and the flange ends follow the same arc. "
@@ -127,16 +126,17 @@ def check(p, s, parts):
     web = beam & Plane(origin=(0, 0, 0), z_dir=(-math.sin(a), 0, math.cos(a)))
     rs = [math.hypot(v.X, v.Z) for v in web.vertices()]
     ri, ro = min(rs), max(rs)
-    yield abs(ri * math.radians(sweep) - p.inner_arc) < 0.1, \
-        f"R1 inner height {ri * math.radians(sweep):.2f} mm along the arc (radius {ri:.2f}, want {p.inner_arc:g})"
+    yield abs(ri - p.inner_r) < 0.05, \
+        f"R1 inner radius {ri:.2f} mm (want {p.inner_r:g}); inner height {ri * math.radians(sweep):.2f} mm along the arc"
     yield abs(ro - ri - p.flange_len) < 0.05, \
         f"R2 flanges {ro - ri:.2f} mm long (want {p.flange_len:g}); outer height {ro * math.radians(sweep):.2f} mm along the arc"
 
     w = beam.bounding_box().size.Y
     yield abs(w - p.flange_w) < 0.01, f"R4 flange width {w:.2f} mm (want {p.flange_w:g})"
 
-    web_t = web.bounding_box().size.Y
-    wing = beam & Plane.YZ.offset((ri + ro) / 2) & Plane.XZ.offset(1.0)
+    rm = (ri + ro) / 2
+    web_t = (web & Plane(origin=(rm * math.cos(a), 0, rm * math.sin(a)), z_dir=(math.cos(a), 0, math.sin(a)))).bounding_box().size.Y
+    wing = beam & Plane.YZ.offset(rm) & Plane.XZ.offset(1.0)
     flange_t = min(e.bounding_box().max.Z for e in wing.edges())
     ok = abs(web_t - p.web_t) < 0.01 and abs(flange_t - p.flange_t) < 0.01
     yield ok, f"R5 web {web_t:.2f} mm, bottom flange {flange_t:.2f} mm thick (want {p.web_t:g} / {p.flange_t:g})"
