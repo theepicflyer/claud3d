@@ -12,6 +12,7 @@ Numbered so `check()` in model.py can reference them. Each has a measurable acce
 - R4: the I is 10 mm wide (flange width), ±0.01 mm.
 - R5: web and flanges are 1 mm thick, ±0.01 mm.
 - R6: 2 mm fillets join the web to both flanges, on both sides (4 fillets).
+- R7: prints without support: no flat downward face above the bed is steeper than 42° from vertical.
 
 ## Interfaces and measurements
 
@@ -21,16 +22,17 @@ None given. Derived: inner radius 15 / 0.436 = 34.4 mm, outer radius 34.4 + 43 =
 
 - Material: PLA
 - Orientation: standing on one flange, web vertical, the other flange leaning at 25° on top.
-- Supports: none. The top flange's underside overhangs the web by 4.5 mm on each side at 65° from vertical.
+- Supports: none. The top flange's underside slopes down toward the web so it stays within 42° of vertical.
 - Slicer changes from defaults: none
 
 ## Decisions
 
 - The flanges are the end plates and the web carries the arcs (first draft had it the other way round, with curved flanges; the user corrected it). Heights are arc lengths between the flanges' outer faces; the radii and 21.5 mm flange length follow.
-- Printed standing on a flange. Lying flat would put the web at mid-height as a 20-35 mm bridge with free edges. Standing up, the only issue is the top flange's 4.5 mm wings (overhangs WARN), accepted without supports. Layer lines run across the web; the load is compressive, so that is fine for use.
+- Printed standing on a flange. Lying flat would put the web at mid-height as a 20-35 mm bridge with free edges. Standing up, the top flange's wings would overhang; its underside is tapered instead (see below). Layer lines run across the web; the load is compressive, so that is fine for use.
 - The flange ends are trimmed to the same arcs as the web's edges, so the inner and outer faces each run as one continuous surface from flange to flange (review #1: a flat flange end met the curved web edge with a 0.01 mm step). The trim band's rounded cross-section rounds the flange corners 1 mm, so the bed footprint has no sharp corners.
 - Second revision (after the first print): flanges doubled to 43 mm and the angle reduced to 30°, both at the user's request. The inner height is kept at 20 mm, so the inner radius grows to 38.2 mm and the outer height follows (42.5 mm). The top flange's underside is now 60° from vertical, steeper than before; still unsupported.
 - Third revision: angle reduced to 25° and the inner height to 15 mm, at the user's request; flanges stay 43 mm. The top flange's underside is now 65° from vertical, still unsupported.
+- The top flange's underside no longer runs parallel to its top face (user's suggestion). It is tilted 42° about the flange's long axis, sloping down toward the web, so the flange is 1 mm thick at its edges and 5.1 mm at the web. That keeps the underside at 42° from vertical at the 25° sweep (3° margin under the 45° rule); `taper()` recomputes it from `sweep` and `underside_max`. The bottom flange stays a flat 1 mm plate since it sits on the bed.
 - 2 mm root fillets where the web meets the flanges, because the 1 mm web separated along a layer when the part was taken off the bed. The fillets spread the joint over more area per layer.
 - Web and flanges are 1 mm (user's choice after seeing the 3 mm version), below the 1.2 mm wall guideline, so the wall thickness WARN is expected. That is about two extrusion lines.
 

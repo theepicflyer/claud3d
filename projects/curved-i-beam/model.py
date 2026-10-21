@@ -3,7 +3,8 @@
 The two flanges are the flat end plates, on radii `sweep` degrees apart. The web joins them, and its inner and outer
 edges follow concentric arcs. The I is `inner_arc` tall at the inner edge (measured along the arc, flange face to
 flange face), so the inner radius is inner_arc / angle; the flanges are `flange_len` long, which sets the outer radius.
-Fillets join the web to the flanges.
+Fillets join the web to the flanges. The top flange's underside slopes down toward the web, so it thickens from
+`flange_t` at its edges and no part of it is steeper than `underside_max` from vertical when printed.
 
 Modelled with the arc centre on the Z axis and one flange's outer face on the plane y=0, then turned so that flange
 lies on the bed. In the print frame the arc centre is the Y axis, the web stands vertical, and the other flange leans
@@ -12,7 +13,7 @@ over at the sweep angle.
 
 import math
 
-from build123d import Axis, Box, GeomType, Plane, Pos, Rectangle, RectangleRounded, Rot, fillet, revolve
+from build123d import Axis, Box, GeomType, Plane, Polygon, Pos, Rectangle, RectangleRounded, Rot, extrude, fillet, revolve
 
 PARAMS = dict(
     inner_arc=15.0,    # R1 I height at the inner edge, along the arc
@@ -23,6 +24,7 @@ PARAMS = dict(
     web_t=1.0,         # R5 web thickness
     corner_r=1.0,      # rounds the flanges' four corners, so the bed footprint has no sharp corners
     root_r=2.0,        # R6 fillets where the web meets the flanges
+    underside_max=42.0,  # R7 steepest the top flange's underside may be, degrees from vertical
 )
 
 PRINT = dict(material="pla")
@@ -33,6 +35,16 @@ SECTIONS = {"beam": ("y", -5.0)}
 def radii(p):
     ri = p.inner_arc / math.radians(p.sweep)
     return ri, ri + p.flange_len
+
+
+def taper(p):
+    """How much the top flange's underside rises across each wing (deg), and the extra thickness it adds at the web.
+
+    The underside is tilted about the flange's long axis. Its normal's vertical part is cos(sweep) * cos(taper), which
+    must not exceed sin(underside_max)."""
+    c = math.sin(math.radians(p.underside_max)) / math.cos(math.radians(p.sweep))
+    b = math.acos(min(1.0, c))
+    return math.degrees(b), (p.flange_w - p.web_t) / 2 * math.tan(b)
 
 
 def _to_print(shape):
@@ -60,7 +72,10 @@ def build(p, s):
     t, over = p.flange_t, 1.0
     plate = Pos((ro - ri) / 2, t / 2, p.flange_w / 2) * Box(ro - ri + 2 * over, t, p.flange_w)
     flange_a = Pos(ri, 0, 0) * plate
-    flange_b = Rot(Z=p.sweep) * Pos(ri, -t, 0) * plate
+    w, h = p.flange_w, taper(p)[1]
+    zs = ((w - p.web_t) / 2, (w + p.web_t) / 2)
+    section = Polygon((0, 0), (0, w), (-t, w), (-t - h, zs[1]), (-t - h, zs[0]), (-t, 0), align=None)
+    flange_b = Rot(Z=p.sweep) * Pos(ri - over, 0, 0) * extrude(Plane.YZ * section, ro - ri + 2 * over)
     web = _ring(p, ri - over, ro + over, p.web_t, 0, 0, p.sweep)
     band = _ring(p, ri, ro, p.flange_w, p.corner_r, -10, p.sweep + 20)
     beam = (flange_a + flange_b + web) & band
@@ -77,9 +92,10 @@ def features(p, s, parts):
                params=["flange_w", "flange_t", "corner_r"],
                text=f"Flat end plate that sits on the bed, {ro - ri:.1f} x {p.flange_w:g} mm, {t:g} mm thick, corners rounded {p.corner_r:g} mm.")
     yield dict(name="top flange", part="beam", at=_pt(p, rm, p.sweep, p.flange_w), normal=(-math.sin(a_top), -0.4, math.cos(a_top)),
-               params=["sweep", "flange_w", "flange_t"],
-               text=f"The other end plate, {p.sweep:g}° from the bottom one. Its underside overhangs the web by "
-                    f"{(p.flange_w - p.web_t) / 2:g} mm each side at {90 - p.sweep:g}° from vertical.")
+               params=["sweep", "flange_w", "flange_t", "underside_max"],
+               text=f"The other end plate, {p.sweep:g}° from the bottom one. Its underside slopes {taper(p)[0]:.0f}° toward "
+                    f"the web, from {p.flange_t:g} mm thick at the edges to {p.flange_t + taper(p)[1]:.1f} mm at the web, "
+                    f"so it prints without support (at most {p.underside_max:g}° from vertical).")
     yield dict(name="web", part="beam", at=_pt(p, rm, p.sweep / 2, (p.flange_w + p.web_t) / 2), normal=(0, -1, 0),
                params=["web_t"], text=f"Flat plate joining the flanges, {p.web_t:g} mm thick.")
     for deg, which in ((0, "bottom"), (p.sweep, "top")):
@@ -88,7 +104,7 @@ def features(p, s, parts):
         a = math.radians(deg)
         n = (-math.sin(a) * sgn, 0, math.cos(a) * sgn)
         base = _pt(p, rm, deg, p.flange_w / 2 + off)
-        at = tuple(b + n_i * (t + p.root_r * 0.3) for b, n_i in zip(base, n))
+        at = tuple(b + n_i * (t + (taper(p)[1] if deg else 0) + p.root_r * 0.3) for b, n_i in zip(base, n))
         yield dict(name=f"{which} root fillets", part="beam", at=at, normal=(n[0] - 0.3, -1, n[2]), params=["root_r"],
                    text=f"{p.root_r:g} mm fillets on both sides where the web meets the {which} flange, so the joint "
                         "doesn't split along a layer line.")
@@ -127,3 +143,9 @@ def check(p, s, parts):
 
     fillets = [f for f in beam.faces() if f.geom_type == GeomType.CYLINDER and abs(f.radius - p.root_r) < 0.01]
     yield len(fillets) == 4, f"R6 {len(fillets)} root fillets of {p.root_r:g} mm between web and flanges (want 4)"
+
+    down = [f for f in beam.faces() if f.geom_type == GeomType.PLANE and f.normal_at().Z < -1e-6
+            and f.center().Z > 0.01]
+    worst = max((math.degrees(math.asin(-f.normal_at().Z)) for f in down), default=0.0)
+    yield worst <= p.underside_max + 0.05, \
+        f"R7 steepest flat downward face above the bed is {worst:.1f}° from vertical (max {p.underside_max:g})"
