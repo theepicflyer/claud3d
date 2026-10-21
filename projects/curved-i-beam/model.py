@@ -1,4 +1,4 @@
-"""curved-i-beam: an I-beam bent into a 30° wedge.
+"""curved-i-beam: an I-beam bent into a 25° wedge.
 
 The two flanges are the flat end plates, on radii `sweep` degrees apart. The web joins them, and its inner and outer
 edges follow concentric arcs. The I is `inner_arc` tall at the inner edge (measured along the arc, flange face to
@@ -15,9 +15,9 @@ import math
 from build123d import Axis, Box, GeomType, Plane, Pos, Rectangle, RectangleRounded, Rot, fillet, revolve
 
 PARAMS = dict(
-    inner_arc=20.0,    # R1 I height at the inner edge, along the arc
+    inner_arc=15.0,    # R1 I height at the inner edge, along the arc
     flange_len=43.0,   # R2 flange length, inner arc to outer arc
-    sweep=30.0,        # R3 angle between the two flanges
+    sweep=25.0,        # R3 angle between the two flanges
     flange_w=10.0,     # R4 width of each flange
     flange_t=1.0,      # R5 flange thickness
     web_t=1.0,         # R5 web thickness
