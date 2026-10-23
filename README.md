@@ -4,6 +4,8 @@ A workflow and toolkit for designing 3D-printed parts with [Claude Code](https:/
 
 The method is written down in [CLAUDE.md](CLAUDE.md): how Claude pins down requirements, picks a print orientation, models, verifies its own work, takes review comments and hands off a print. Claude Code reads it when you run `claude` in this folder. The framework that Claude drives lives in `cadlib/` and the `cad` command: builds, printability checks, renders, slicing and the review app.
 
+![The review app showing the cutting-board stand on the print plate, with Claude's feature labels on the model and the feature list in the sidebar](docs/images/review-features.png)
+
 ## How it works
 
 1. You tell Claude what you need, for example "a stand that holds two cutting boards on edge next to my sink". Claude asks for measurements and constraints and writes them down as numbered requirements with acceptance criteria.
@@ -13,6 +15,24 @@ The method is written down in [CLAUDE.md](CLAUDE.md): how Claude pins down requi
 5. When you're happy, `cad open` opens the sliced project in Bambu Studio. Without a slicer configured, you get the checked STL files.
 
 `projects/` holds three real projects you can build and look at: `example-box` (a box with a friction-fit lid), `cutting-board-stand` and `curved-i-beam`. Each has its requirements, decisions and review history in its own `CLAUDE.md` and `review/` folder.
+
+## Screenshots
+
+The assembled view puts each part where it goes. Here the stand holds the two cutting boards and a baking sheet, sitting on the counter.
+
+![Assembly view of the cutting-board stand holding two boards and a baking sheet](docs/images/review-assembly.png)
+
+The comment threads stay with the model. Each marker is a comment you left, and Claude's reply says what it changed.
+
+![Review comments pinned to the model, with a resolved thread and Claude's reply in the sidebar](docs/images/review-comments.png)
+
+Measuring snaps to the exact CAD geometry and splits the distance into X, Y and Z. This one confirms the 185 mm panel span.
+
+![Measuring the 185 mm span between the stand's side panels](docs/images/review-measure.png)
+
+Each build writes a render sheet per part for Claude to look at. This curved I-beam has 1 mm walls on purpose, so the wall-thickness check marks them in magenta.
+
+![Render sheet of the curved I-beam: iso views, front, right and top projections, and a cross-section](docs/images/render-sheet.png)
 
 ## Requirements
 
