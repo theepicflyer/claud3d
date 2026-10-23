@@ -1,4 +1,4 @@
-"""Printer, material and fit settings from printer.toml, with per-project overrides."""
+"""Printer, material and fit settings from printer.toml and printer.local.toml, with per-project overrides."""
 
 from __future__ import annotations
 
@@ -8,6 +8,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 PRINTER_TOML = ROOT / "printer.toml"
+PRINTER_LOCAL_TOML = ROOT / "printer.local.toml"
+PROJECT_DIRS = (ROOT / "projects", ROOT / "private")
 
 
 @dataclass
@@ -35,6 +37,11 @@ class Nozzle:
 NOZZLE_NAMES = ["left (main)", "right (auxiliary)"]
 
 
+def nozzles_from_volume(volume: list[float]) -> list[Nozzle]:
+    x, y, z = (float(v) for v in volume)
+    return [Nozzle("nozzle 1", "", (0.0, x), (0.0, y), z)]
+
+
 def nozzles_from_profile(machine: dict) -> list[Nozzle]:
     """Per-nozzle printable regions from a flattened Bambu machine preset."""
     areas = machine.get("extruder_printable_area") or [",".join(machine["printable_area"])]
@@ -52,6 +59,7 @@ def nozzles_from_profile(machine: dict) -> list[Nozzle]:
 @dataclass
 class Settings:
     printer_name: str
+    slicer: str
     machine_profile: str
     process_profile: str
     nozzle: float
@@ -80,15 +88,27 @@ class Settings:
         return self.fit[kind] + self.material.clearance_extra
 
 
-def load_settings(overrides: dict | None = None) -> Settings:
-    """Load printer.toml; `overrides` is a model's PRINT dict (material, process, filament, machine, slicer, design, fit)."""
+def _merge(base: dict, over: dict) -> dict:
+    out = dict(base)
+    for k, v in over.items():
+        out[k] = _merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
+
+
+def load_settings(overrides: dict | None = None, local: bool = True) -> Settings:
+    """Load printer.toml with printer.local.toml merged over it (unless local=False).
+
+    `overrides` is a model's PRINT dict (material, process, filament, machine, slicer, design, fit).
+    """
     from .bambu import resolve_profile
 
     raw = tomllib.loads(PRINTER_TOML.read_text())
+    if local and PRINTER_LOCAL_TOML.exists():
+        raw = _merge(raw, tomllib.loads(PRINTER_LOCAL_TOML.read_text()))
     o = overrides or {}
     pr = raw["printer"]
     mats = {
-        k: Material(k, v["filament_profile"], v.get("clearance_extra", 0.0), v.get("notes", ""))
+        k: Material(k, v.get("filament_profile", ""), v.get("clearance_extra", 0.0), v.get("notes", ""))
         for k, v in raw["materials"].items()
         if isinstance(v, dict)
     }
@@ -98,14 +118,24 @@ def load_settings(overrides: dict | None = None) -> Settings:
     material = mats[mat_key]
     if "filament" in o:
         material = Material(material.key, o["filament"], material.clearance_extra, material.notes)
-    machine = o.get("machine", pr["machine_profile"])
+    machine = o.get("machine", pr.get("machine_profile", ""))
+    slicer = pr.get("slicer", "bambu")
+    if slicer not in ("bambu", "none"):
+        raise ValueError(f"printer.slicer must be 'bambu' or 'none', not {slicer!r}")
+    if slicer == "none":
+        if "build_volume" not in pr:
+            raise KeyError("printer.slicer = 'none' needs printer.build_volume = [x, y, z] in mm")
+        nozzles = nozzles_from_volume(pr["build_volume"])
+    else:
+        nozzles = nozzles_from_profile(resolve_profile("machine", machine))
     return Settings(
         printer_name=pr["name"],
+        slicer=slicer,
         machine_profile=machine,
-        process_profile=o.get("process", pr["process_profile"]),
+        process_profile=o.get("process", pr.get("process_profile", "")),
         nozzle=pr["nozzle"],
         layer_height=pr["layer_height"],
-        nozzles=nozzles_from_profile(resolve_profile("machine", machine)),
+        nozzles=nozzles,
         design={**raw["design"], **o.get("design", {})},
         fit={**raw["fit"], **o.get("fit", {})},
         materials=mats,

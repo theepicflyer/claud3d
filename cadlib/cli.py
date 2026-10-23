@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 from . import bambu
-from .config import ROOT
+from .config import PROJECT_DIRS, ROOT
 from .project import parse_overrides, resolve_project, run_build
 
 TEMPLATE = Path(__file__).parent / "template"
@@ -20,7 +20,7 @@ def cmd_new(a) -> int:
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", a.name):
         print("project names are lowercase-kebab-case", file=sys.stderr)
         return 2
-    dest = ROOT / "projects" / a.name
+    dest = (ROOT / "private" if a.private else ROOT / "projects") / a.name
     if dest.exists():
         print(f"{dest} already exists", file=sys.stderr)
         return 1
@@ -99,11 +99,11 @@ def cmd_profiles(a) -> int:
 
 
 def cmd_list(a) -> int:
-    for d in sorted((ROOT / "projects").iterdir()):
+    for d in sorted(d for base in PROJECT_DIRS if base.is_dir() for d in base.iterdir()):
         if (d / "model.py").exists():
             rep = d / "out" / "report.md"
             status = re.search(r"Overall: \*\*(\w+)\*\*", rep.read_text()).group(1) if rep.exists() else "not built"
-            print(f"{d.name:30s} {status}")
+            print(f"{d.name:30s} {status:10s} {d.parent.name}/")
     return 0
 
 
@@ -111,12 +111,13 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="cad", description="Code-driven CAD for 3D printing")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    s = sub.add_parser("new", help="create projects/<name> from the template")
+    s = sub.add_parser("new", help="create projects/<name> (or private/<name>) from the template")
     s.add_argument("name")
+    s.add_argument("--private", action="store_true", help="create it under the gitignored private/ folder")
     s.set_defaults(fn=cmd_new)
 
     s = sub.add_parser("build", help="build, export, check, render and slice a project")
-    s.add_argument("project", help="project name under projects/ or a path")
+    s.add_argument("project", help="project name under projects/ or private/, or a path")
     s.add_argument("-p", "--param", action="append", metavar="KEY=VALUE", help="override a PARAMS entry")
     s.add_argument("--no-render", action="store_true")
     s.add_argument("--no-slice", action="store_true")

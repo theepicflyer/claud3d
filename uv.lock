@@ -166,7 +166,7 @@ wheels = [
 ]
 
 [[package]]
-name = "claude-3d"
+name = "claud3d"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

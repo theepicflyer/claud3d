@@ -1,9 +1,13 @@
 # Printer and material defaults. Projects can override any of these in model.py via PRINT = {...}.
+# Your own setup goes in printer.local.toml (gitignored), which is merged over this file key by key.
 # Profile names are Bambu Studio presets; list them with `uv run cad profiles <machine|process|filament> [regex]`.
 
 [printer]
 name = "Bambu Lab X2D"
-machine_profile = "My X2D 0.4 nozzle"
+# "bambu" slices with the Bambu Studio CLI and reads the printable area from machine_profile.
+# "none" skips slicing and needs build_volume = [x, y, z] in mm instead (for other slicers or printers).
+slicer = "bambu"
+machine_profile = "Bambu Lab X2D 0.4 nozzle"
 process_profile = "0.20mm Standard @BBL X2D"
 nozzle = 0.4
 layer_height = 0.2
@@ -48,4 +52,4 @@ notes = "Stiff, heat resistant (~95 C), dimensionally stable for ABS. Needs encl
 [materials.tpu]
 filament_profile = "Bambu TPU 95A HF @BBL X2D 0.4 nozzle"
 clearance_extra = 0.10
-notes = "Flexible (95A). Untested on this X2D. Left (direct-drive) nozzle only. Prints slow, strings, no AMS for standard TPU. Avoid supports and bridges, use thicker walls (>= 1.6 mm) and generous clearances."
+notes = "Flexible (95A). Left (direct-drive) nozzle only. Prints slow, strings, no AMS for standard TPU. Avoid supports and bridges, use thicker walls (>= 1.6 mm) and generous clearances."
