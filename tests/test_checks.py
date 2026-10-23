@@ -2,13 +2,13 @@ import pytest
 from build123d import Axis, Box, Cone, Pos
 
 from cadlib import checks
-from cadlib.config import load_settings
+from conftest import requires_bambu
 from cadlib.render import tessellate
 
 
 @pytest.fixture(scope="module")
-def s():
-    return load_settings()
+def s(stock_settings):
+    return stock_settings
 
 
 def statuses(shape, s):
@@ -22,6 +22,7 @@ def test_plain_block_passes(s):
     assert rep.stats["bbox"] == [20, 20, 10]
 
 
+@requires_bambu
 def test_nozzle_regions_from_profile(s):
     left, right = s.nozzles
     assert left.size == (256, 256, 261) and left.drive == "direct drive"
@@ -36,6 +37,7 @@ def test_nozzle_regions_from_profile(s):
     ((20, 20, 258), checks.WARN, "left (main)"),
     ((300, 20, 10), checks.FAIL, "exceeds"),
 ])
+@requires_bambu
 def test_build_volume_per_nozzle(s, dims, status, phrase):
     _, rep = statuses(Box(*dims), s)
     f = next(f for f in rep.findings if f.check == "build volume")

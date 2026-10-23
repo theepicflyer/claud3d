@@ -16,7 +16,7 @@ import numpy as np
 from build123d import Pos, Shape, export_step
 
 from . import bambu, checks, render
-from .config import ROOT, Settings, load_settings
+from .config import PROJECT_DIRS, ROOT, Settings, load_settings
 from .topology import topology
 
 
@@ -40,7 +40,7 @@ class BuildResult:
 
 def resolve_project(arg: str) -> Path:
     p = Path(arg)
-    for cand in (p, ROOT / "projects" / arg, ROOT / arg):
+    for cand in (p, *(d / arg for d in PROJECT_DIRS), ROOT / arg):
         if (cand / "model.py").is_file():
             return cand.resolve()
     raise FileNotFoundError(f"No model.py found for project {arg!r}")
@@ -132,7 +132,9 @@ def run_build(project: Path, overrides: dict | None = None, do_render: bool = Tr
         for ok, msg in mod.check(p, s, parts):
             res.spec_findings.append(checks.Finding(checks.PASS if ok else checks.FAIL, "spec", msg))
 
-    if do_slice:
+    if do_slice and s.slicer == "none":
+        log("slicing skipped: printer.slicer = 'none'")
+    elif do_slice:
         placed = place_on_plate(meshes, s)
         if placed is None:
             res.slice = bambu.SliceResult(False, -1, "parts don't fit on one plate together; split them across projects")
@@ -310,6 +312,8 @@ def write_report(res: BuildResult, p: SimpleNamespace, s: Settings) -> Path:
         else:
             lines += [f"- FAIL slicer: {sl.message}"]
         lines.append("")
+    elif s.slicer == "none":
+        lines += ["## slice", "", "- skipped: printer.slicer = 'none'; slice the STL files in your slicer", ""]
     if res.images:
         lines += ["## renders", ""] + [f"- {i.relative_to(res.project)}" for i in res.images] + [""]
     md = out / "report.md"

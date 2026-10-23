@@ -5,3 +5,7 @@ __pycache__/
 .tmp-test/
 projects/*/out/
 .playwright-mcp/
+private/
+printer.local.toml
+CLAUDE.local.md
+.claude/settings.local.json

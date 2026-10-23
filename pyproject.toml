@@ -1,7 +1,8 @@
 [project]
-name = "claude-3d"
+name = "claud3d"
 version = "0.1.0"
-description = "Code-driven CAD environment for 3D-printable parts"
+license = "MIT"
+description = "Claude Code designs 3D-printable parts as parametric build123d models: build, check, review in the browser, slice"
 requires-python = ">=3.13,<3.14"
 dependencies = [
     "build123d>=0.13",
