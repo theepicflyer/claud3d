@@ -112,6 +112,7 @@ class SliceResult:
     filament_g: float | None = None
     feature_times: dict[str, float] = field(default_factory=dict)
     filament_map: list[int] = field(default_factory=list)  # 1-based extruder per filament
+    plates: int = 0
     warnings: list[str] = field(default_factory=list)
     log_tail: str = ""
 
@@ -120,6 +121,7 @@ def _parse_result_json(rj: dict, res: SliceResult) -> None:
     plates = rj.get("sliced_plates") or []
     if not plates:
         return
+    res.plates = len(plates)
     res.print_time_s = sum(p.get("total_predication", 0) for p in plates)
     res.filament_g = sum(f.get("total_used_g", 0) for p in plates for f in p.get("filaments", []))
     res.feature_times = {}
@@ -145,7 +147,8 @@ def slice_files(
     """Slice STL/3MF models with the Bambu Studio CLI and export a project 3MF.
 
     With arrange=False the models' own XY positions (bed coordinates) are kept. The CLI's auto-arrange only
-    places objects where every nozzle reaches, so it rejects parts that need the full single-nozzle area.
+    places objects where every nozzle reaches, so it rejects parts that need the full single-nozzle area; it adds
+    plates when the parts don't fit on one.
     """
     cmd = bambu_command()
     if not cmd:

@@ -200,7 +200,7 @@ uv run pytest -q
 
 - **Multi-nozzle printers** (for example the Bambu Lab X2D or H2D) can have nozzles that don't reach the whole bed. `s.shared` is the region every nozzle reaches; multi-material prints, and anything that might print on a restricted nozzle, must stay inside it. Single-material prints on the nozzle with the largest reach get its full volume.
 - **Long parts:** if one direction of the shared region is longer, a long part often fits every nozzle once its long side runs along it. Do that unless the orientation matters.
-- **Plate layout:** `cad build` lays parts out on the plate itself (shelf packing, 5 mm gaps), inside the shared region when everything fits. The Bambu CLI's own auto-arrange only uses the shared region and rejects larger parts, so it is turned off.
+- **Plate layout:** `cad build` lays parts out on the plate itself (shelf packing, 5 mm gaps), inside the shared region when everything fits. The Bambu CLI's own auto-arrange only uses the shared region and rejects larger parts, so it is normally off. When the parts don't fit one plate together but each fits the shared region, `cad build` hands them to the CLI's auto-arrange, which spreads them over several plates in one project; the report gives the plate count. Parts that need several plates and the full single-nozzle area have to be split across projects.
 - **Nozzle choice:** the CLI maps a single filament to the first nozzle. When printing from the GUI with an AMS, the nozzle is chosen at print time.
 
 ### Materials
