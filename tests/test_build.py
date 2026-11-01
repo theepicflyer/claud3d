@@ -64,6 +64,21 @@ def test_full_width_part_slices_on_left_nozzle():
     assert r.filament_map == [1]
 
 
+
+@requires_bambu
+def test_parts_too_big_for_one_plate_slice_across_plates():
+    tmp_path = ROOT / ".tmp-test" / "multi"
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    s = load_settings(local=False)
+    stls = []
+    for i in range(2):
+        tessellate(Box(150, 200, 3)).export(tmp_path / f"p{i}.stl")
+        stls.append(tmp_path / f"p{i}.stl")
+    r = bambu.slice_files(stls, tmp_path / "out" / "multi.gcode.3mf", s.machine_profile, s.process_profile,
+                          s.material.filament_profile, tmp_path / "profiles", arrange=True)
+    assert r.ok, r.message
+    assert r.plates == 2 and r.print_time_s > 0
+
 def test_local_toml_merges_over_printer_toml(monkeypatch):
     local = ROOT / ".tmp-test" / "printer.local.toml"
     local.parent.mkdir(parents=True, exist_ok=True)

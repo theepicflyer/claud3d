@@ -136,18 +136,26 @@ def run_build(project: Path, overrides: dict | None = None, do_render: bool = Tr
         log("slicing skipped: printer.slicer = 'none'")
     elif do_slice:
         placed = place_on_plate(meshes, s)
+        plate_dir = out / "slice" / "plate"
+        plate_dir.mkdir(parents=True, exist_ok=True)
+        for stale in plate_dir.glob("*.stl"):
+            stale.unlink()
+        arrange = False
+        if placed is None and all(checks.fits(m.extents, s.shared.size) for m in meshes.values()):
+            # Too much for one plate, but every part fits every nozzle: the CLI's auto-arrange adds plates.
+            placed, arrange = {n: m.copy() for n, m in meshes.items()}, True
+            log("parts don't fit one plate together; letting Bambu Studio arrange them across plates")
         if placed is None:
-            res.slice = bambu.SliceResult(False, -1, "parts don't fit on one plate together; split them across projects")
+            res.slice = bambu.SliceResult(False, -1, "parts don't fit on one plate together, and a part is too big "
+                                          "for Bambu Studio's auto-arrange (shared nozzle region); split them across projects")
         else:
-            plate_dir = out / "slice" / "plate"
-            plate_dir.mkdir(parents=True, exist_ok=True)
             plate_stls = []
             for name, m in placed.items():
                 plate_stls.append(plate_dir / f"{name}.stl")
                 m.export(plate_stls[-1])
             res.slice = bambu.slice_files(plate_stls, bambu.project_3mf(project), s.machine_profile,
                                           s.process_profile, s.material.filament_profile, out / "slice" / "profiles",
-                                          overrides=s.slicer_overrides)
+                                          overrides=s.slicer_overrides, arrange=arrange)
             if res.slice.project_3mf:
                 res.files.append(res.slice.project_3mf)
 
@@ -306,7 +314,8 @@ def write_report(res: BuildResult, p: SimpleNamespace, s: Settings) -> Path:
         lines += ["## slice", ""]
         if sl.ok:
             nozzles = ", ".join(s.nozzles[i - 1].name for i in sl.filament_map if 0 < i <= len(s.nozzles)) or "unknown"
-            lines += [f"- time {_fmt_time(sl.print_time_s or 0)}, filament {sl.filament_g or 0:.1f} g, nozzle {nozzles}",
+            plates = f", {sl.plates} plates" if sl.plates > 1 else ""
+            lines += [f"- time {_fmt_time(sl.print_time_s or 0)}, filament {sl.filament_g or 0:.1f} g, nozzle {nozzles}{plates}",
                       f"- project: {sl.project_3mf.relative_to(res.project)}"]
             lines += [f"- WARN slicer: {w}" for w in sl.warnings]
         else:
@@ -326,7 +335,7 @@ def write_report(res: BuildResult, p: SimpleNamespace, s: Settings) -> Path:
         "spec": [vars(f) for f in res.spec_findings],
         "slice": None if not res.slice else {
             "ok": res.slice.ok, "message": res.slice.message, "print_time_s": res.slice.print_time_s,
-            "filament_g": res.slice.filament_g, "warnings": res.slice.warnings},
+            "filament_g": res.slice.filament_g, "plates": res.slice.plates, "warnings": res.slice.warnings},
     }
     (out / "report.json").write_text(json.dumps(data, indent=2, default=str))
     return md
