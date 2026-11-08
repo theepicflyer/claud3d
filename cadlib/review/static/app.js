@@ -1262,9 +1262,10 @@ function renderReport() {
     else if (!sl.ok) { tally('FAIL'); body = findingBlock({ status: 'FAIL', check: 'slicer', detail: sl.message }, {}); }
     else {
       const plates = sl.plates > 1 ? `<div><b>${sl.plates}</b><span>plates</span></div>` : '';
+      const noz = sl.nozzle.match(/^(.*?)\s*(?:\((.*)\))?$/); // "left (main)" -> "left", "main nozzle"
       body = `<div class="stats"><div><b>${esc(sl.time)}</b><span>print time</span></div>
         <div><b>${sl.filament_g.toFixed(1)} g</b><span>${esc((sl.material || 'filament').toUpperCase())}</span></div>
-        <div><b>${esc(sl.nozzle)}</b><span>nozzle</span></div>${plates}</div>`;
+        <div><b>${esc(noz[1])}</b><span>${noz[2] ? `${esc(noz[2])} nozzle` : 'nozzle'}</span></div>${plates}</div>`;
     }
     (sl.warnings || []).forEach((w) => { tally('WARN'); body += findingBlock({ status: 'WARN', check: 'slicer', detail: w }, {}); });
     out.push(`<div class="rgroup"><h3>Slice</h3>${body}</div>`);
