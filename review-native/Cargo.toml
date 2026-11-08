@@ -1,0 +1,24 @@
+[package]
+name = "cad-review"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "Experimental native review app for claud3d, built with Rune"
+
+[dependencies]
+rune = { git = "https://github.com/anomalyco/rune", rev = "79fed3b5f1800fd031b8178172a6af7d713c9303" }
+wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "metal", "wgsl"] }
+bytemuck = { version = "1.25", features = ["derive"] }
+glam = "0.30"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+png = "0.18"
+base64 = "0.22"
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+wgpu = { version = "30", default-features = false, features = ["vulkan", "dx12"] }
+
+[profile.release]
+codegen-units = 16
+incremental = true

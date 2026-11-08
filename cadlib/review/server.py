@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import subprocess
 import threading
 import time
 import webbrowser
@@ -138,10 +139,12 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"ok": True})
 
 
-def serve(project: Path, port: int | None = None, open_browser: bool = True, keep_running: bool = False) -> None:
-    port = port or default_port(project.name)
-    srv = ReviewServer(project, port, keep_running)
-    url = f"http://127.0.0.1:{port}/"
+def serve(project: Path, port: int | None = None, open_browser: bool = True, keep_running: bool = False,
+          native: list[str] | None = None) -> None:
+    """Serve the review app. With `native` (a command line for the native app), run that instead of a
+    browser tab, pointed at this server; closing its window ends the review."""
+    srv = ReviewServer(project, default_port(project.name) if port is None else port, keep_running)
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
     print(f"review app for {project.name} at {url}", flush=True)
 
     def maybe_open() -> None:
@@ -150,7 +153,18 @@ def serve(project: Path, port: int | None = None, open_browser: bool = True, kee
         if srv.last_request == 0.0:
             webbrowser.open(url)
 
-    if open_browser:
+    app = None
+    if native:
+        app = subprocess.Popen([*native, "--project", str(project), "--server", url.rstrip("/")])
+
+        def watch() -> None:
+            app.wait()
+            if not srv.submissions:
+                print(f"REVIEW {project.name}: the review window was closed without sending anything.", flush=True)
+            srv.shutdown()
+
+        threading.Thread(target=watch, daemon=True).start()
+    elif open_browser:
         threading.Thread(target=maybe_open, daemon=True).start()
     try:
         srv.serve_forever()
@@ -158,3 +172,9 @@ def serve(project: Path, port: int | None = None, open_browser: bool = True, kee
         pass
     finally:
         srv.server_close()
+        if app and app.poll() is None:
+            # After a send the app shows "Sent" for a moment and quits on its own.
+            try:
+                app.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                app.terminate()
