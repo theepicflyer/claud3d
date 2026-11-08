@@ -203,23 +203,32 @@ ul { list-style: none; margin: 0; padding: 0; }
 
 /* comments */
 .empty kbd { opacity: .8; }
-.card { border: 1px solid var(--line); border-left-width: 3px; border-radius: 7px; padding: 8px; margin: 8px 0; }
+.card { border: 1px solid var(--line); border-left-width: 3px; border-radius: 7px; padding: 8px 10px; margin: 8px 0; }
 .card.draft { border-color: var(--accent); }
 .card.thread { border-left-color: var(--open); }
 .card.thread.resolved { border-left-color: var(--resolved); }
 .card.focus { box-shadow: 0 0 0 2px var(--accent); }
-.card .head { display: flex; align-items: center; gap: 6px; font-size: 12px; }
-.card .num { font-weight: 700; color: #fff; border-radius: 8px; padding: 0 6px; background: var(--accent); }
+.card .head { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; }
+.card .num { font-weight: 700; color: #fff; border-radius: 8px; padding: 0 6px; background: var(--accent); white-space: nowrap; }
 .card.thread .num { background: var(--open); }
 .card.thread.resolved .num { background: var(--resolved); }
-.card .where { color: var(--muted); font-size: 11px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.card textarea { width: 100%; margin-top: 6px; min-height: 52px; resize: vertical; font: inherit; color: var(--ink);
-  background: var(--bg); border: 1px solid var(--line); border-radius: 5px; padding: 5px; }
-.card .msg { margin-top: 6px; font-size: 12px; white-space: pre-wrap; }
-.card .msg b { font-weight: 600; }
-.card .msg.claude b { color: var(--accent); }
-.card .actions { display: flex; gap: 4px; margin-top: 4px; justify-content: flex-end; }
-.card .actions button { font-size: 12px; padding: 2px 6px; }
+.card .where { color: var(--muted); font-size: 11px; flex: 1; padding-top: 1px; }
+.status { font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 8px; white-space: nowrap;
+  color: var(--resolved); background: color-mix(in srgb, var(--resolved) 16%, transparent); }
+.status.open { color: var(--open); background: color-mix(in srgb, var(--open) 14%, transparent); }
+.status.draft { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.status.unsent { font-style: italic; }
+.msgs { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.msg { padding: 6px 8px; border-radius: 6px; background: var(--bg); font-size: 12.5px; }
+.msg.claude { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.msg .who { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: 1px; }
+.msg.claude .who { color: var(--accent); }
+.msg .text { white-space: pre-wrap; }
+.card textarea { width: 100%; margin-top: 8px; min-height: 52px; resize: vertical; font: inherit; color: var(--ink);
+  background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 5px 7px; }
+.card textarea:focus { outline: 2px solid color-mix(in srgb, var(--open) 50%, transparent); outline-offset: -1px; }
+.card .actions { display: flex; gap: 6px; margin-top: 8px; justify-content: flex-end; }
+.card .actions button { font-size: 12px; padding: 2px 9px; border: 1px solid var(--line); border-radius: 5px; }
 #side footer { padding: 10px 14px; border-top: 1px solid var(--line); }
 #send { width: 100%; padding: 8px; background: var(--accent); color: #fff; font-weight: 600; }
 #send:hover:not(:disabled) { background: #c2640f; }
