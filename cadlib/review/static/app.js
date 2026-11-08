@@ -1014,7 +1014,7 @@ $('add-general').addEventListener('click', () => createDraft(null));
 
 function anchorText(a) {
   if (!a) return 'general comment on this view';
-  const near = a.feature ? ` (near ${a.feature})` : '';
+  const near = a.feature ? ` · near ${a.feature}` : '';
   if (a.kind !== 'measure' && near) return `${a.kind === 'circle' ? 'circle' : 'point'} on ${a.part}${near}`;
   if (a.kind === 'measure') return `${a.part} → ${a.part_b}: ${a.distance.toFixed(2)} mm`;
   const where = `${a.part} ${fmt(a.point)}`;
@@ -1031,11 +1031,12 @@ function focusCard(key, edit) {
   }
 }
 
+const replyOpen = new Set();
 function renderComments() {
   const drafts = $('drafts');
   drafts.innerHTML = state.drafts.map((d, i) => `
     <div class="card draft" data-key="${d.key}">
-      <div class="head"><span class="num">new ${i + 1}</span><span class="where" title="${esc(anchorText(d.anchor))}">${esc(anchorText(d.anchor))}</span></div>
+      <div class="head"><span class="num">new ${i + 1}</span><span class="where" title="${esc(anchorText(d.anchor))}">${esc(anchorText(d.anchor))}</span><span class="status draft">Draft</span></div>
       <textarea placeholder="What should change here?">${esc(d.text)}</textarea>
       <div class="actions"><button data-act="goto">View</button><button data-act="delete">Delete</button></div>
     </div>`).join('');
@@ -1054,14 +1055,18 @@ function renderComments() {
   threads.innerHTML = shown.map((t) => {
     const r = state.replies[t.id] || {};
     const status = r.status || t.status;
+    // Open threads expect an answer; resolved ones only get a reply box when asked for one.
+    const replying = t.status === 'open' || r.text || replyOpen.has(t.id);
     return `
     <div class="card thread ${t.status}" data-key="t${t.id}" data-id="${t.id}">
-      <div class="head"><span class="num">#${t.id}</span><span class="where">${esc(anchorText(t.anchor))}</span><span class="muted small">${esc(status)}${r.status ? ' (unsent)' : ''}</span></div>
-      ${t.messages.map((m) => `<div class="msg ${m.by}"><b>${m.by === 'claude' ? 'Claude' : 'You'}:</b> ${esc(m.text)}</div>`).join('')}
-      ${t.screenshot ? `<div class="small"><a href="/review/${esc(t.screenshot)}" target="_blank">screenshot</a></div>` : ''}
-      <textarea placeholder="Reply…">${esc(r.text || '')}</textarea>
+      <div class="head"><span class="num">#${t.id}</span><span class="where" title="${esc(anchorText(t.anchor))}">${esc(anchorText(t.anchor))}</span>
+        <span class="status ${status}${r.status ? ' unsent' : ''}" ${r.status ? 'title="Changes when you send"' : ''}>${cap(status)}${r.status ? ' · unsent' : ''}</span></div>
+      <div class="msgs">${t.messages.map((m) => `<div class="msg ${m.by}"><div class="who">${m.by === 'claude' ? 'Claude' : 'You'}</div><div class="text">${esc(m.text)}</div></div>`).join('')}</div>
+      ${replying ? `<textarea placeholder="Reply…">${esc(r.text || '')}</textarea>` : ''}
       <div class="actions">
         ${t.camera ? '<button data-act="goto">View</button>' : ''}
+        ${t.screenshot ? '<button data-act="shot">Screenshot</button>' : ''}
+        ${replying ? '' : '<button data-act="reply">Reply</button>'}
         <button data-act="status">${status === 'resolved' ? 'Reopen' : 'Resolve'}</button>
       </div>
     </div>`;
@@ -1069,8 +1074,14 @@ function renderComments() {
   threads.querySelectorAll('.card').forEach((card) => {
     const t = state.threads.find((x) => x.id === Number(card.dataset.id));
     const r = () => (state.replies[t.id] ||= {});
-    card.querySelector('textarea').addEventListener('input', (e) => { r().text = e.target.value; persist(); updateSend(); });
+    card.querySelector('textarea')?.addEventListener('input', (e) => { r().text = e.target.value; persist(); updateSend(); });
     card.querySelector('[data-act="goto"]')?.addEventListener('click', () => goToCamera(t.camera));
+    card.querySelector('[data-act="shot"]')?.addEventListener('click', () => window.open(`/review/${t.screenshot}`, '_blank'));
+    card.querySelector('[data-act="reply"]')?.addEventListener('click', () => {
+      replyOpen.add(t.id);
+      renderComments();
+      document.querySelector(`.card[data-id="${t.id}"] textarea`)?.focus();
+    });
     card.querySelector('[data-act="status"]').addEventListener('click', () => {
       const cur = r().status || t.status;
       r().status = cur === 'resolved' ? 'open' : 'resolved';
