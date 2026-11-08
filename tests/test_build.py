@@ -31,6 +31,10 @@ def test_example_box_builds(do_slice):
     assert lid[2][2] == pytest.approx(-1) and lid[2][3] == pytest.approx(34)  # flipped onto the box
     assert {f["name"] for f in view["features"]} >= {"lip", "finger scallop", "wall"}
     assert view["params"]["lip_h"] == 3.0 and view["parts"]["box"]["topo"] == "box.topo.json"
+    rep = view["report"]
+    assert set(rep["parts"]) == {"box", "lid"} and rep["spec"] and rep["assembly"][0]["items"][0]["parts"] == ["box", "lid"]
+    assert {f["check"] for f in rep["parts"]["box"]["findings"]} >= {"manifold", "overhangs", "wall thickness"}
+    assert rep["slice"]["ok"] and rep["slice"]["time"] if do_slice else rep["slice"] is None
 
 
 @requires_bambu

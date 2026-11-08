@@ -140,6 +140,8 @@ uv run pytest -q
 
 ### Reading the report
 
+Findings that have locations list them underneath, in the part's print frame (the assembly frame for assembly findings). The review app's Report lists every location and flies to it on a click.
+
 - **manifold** FAIL: the solid is broken, usually from a bad boolean or a zero-thickness feature. Fix this first.
 - **bodies** WARN: one part contains several disconnected solids. If that isn't intended, a feature didn't fuse; overlap booleans by 0.01 mm instead of using coincident faces.
 - **build volume**: PASS if the part fits the region every nozzle reaches. WARN if it fits only after a 90° turn about Z, or only for some nozzles. FAIL if it doesn't fit. See "Printable area".
@@ -158,19 +160,26 @@ uv run pytest -q
 
 - **Navigation matches Bambu Studio:** left-drag rotates (0.8° per pixel), right- or middle-drag pans, the wheel zooms toward the view center (10% per notch).
 - **Tools take over the left button:** 1 pin, 2 circle, 3 measure. Space switches between Navigate and the last tool. Esc cancels a gesture, then returns to Navigate. Right-drag, middle-drag and the wheel work in every mode, and Ctrl+right-drag rotates. A measurement in progress survives a trip to Navigate and back.
+- **Tab** switches between Plate and Assembly. Each layout keeps its own camera.
+- **Controls window:** lists the mouse controls and shortcuts. It opens on the first visit only; the Controls button at the bottom left and `?` bring it back.
 - **Open in Bambu Studio** (under the build info, or B) opens the latest sliced project, like `cad open`.
+- **Sidebar:** Parts, Report and Features collapse; Comments stays open.
+  - Parts: click a name to show only that part, again to show all.
+  - Report: slice time and filament, requirements from `check()`, printability findings per part (identical parts share an entry) with clickable locations, and the gaps between assembled parts, closest first.
+  - Which sections are open and whether the Controls window was seen are kept in a cookie, so they carry across projects (each project's server has its own port, and so its own local storage).
 - **Measure:**
   - Snaps to exact B-rep vertices, circle centers, edge midpoints and edges. Ctrl+click places a point freely.
   - Shows distance, colour-coded ΔX/ΔY/ΔZ legs, "along X/Y/Z" when the distance is axis-aligned, face-to-face distance for parallel flat faces, and diameters.
-- **Always shown:**
-  - A readout panel with the hovered point's part-frame coordinates.
+- **On the canvas:**
+  - A readout panel with the hovered point's part-frame coordinates, while the pointer is on the model.
   - An axis triad.
+  - Feature labels, which hide when their point is behind the model or under a nearer label.
 - **Views:**
   - "Plate" layout: the parts on the bed, with any area some nozzle can't reach shaded.
   - "Assembly" layout.
   - A section plane.
 - **Data it reads:**
-  - `out/view.json`: plate offsets, assembly transforms (a rigid fit between each part's printed and assembled tessellations), features, params and a report summary.
+  - `out/view.json`: plate offsets, assembly transforms (a rigid fit between each part's printed and assembled tessellations), features, params and the report (every finding with its locations, assembly gaps, spec results and a slice summary).
   - `out/<part>.stl` and `out/<part>.topo.json`.
 - **Reloading:** an open tab reloads the model when `view.json` changes. It reloads itself, keeping the camera and unsent drafts, when files in `cadlib/review/static/` change.
 - **`--keep`:** keeps serving after a send, for example while rebuilding repeatedly.

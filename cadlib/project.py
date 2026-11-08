@@ -234,8 +234,6 @@ def write_view(res: BuildResult, s: Settings, meshes: dict, asm: dict, shapes: d
             asm_dir.mkdir(exist_ok=True)
             am.export(asm_dir / f"{name}.stl")
             assembly[name] = {"stl": f"assembly/{name}.stl"}
-    rep = {r.name: {"status": r.status, "findings": [vars(f) for f in r.findings if f.status != checks.PASS]}
-           for r in res.reports}
     view = {
         "project": res.project.name,
         "built_at": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -244,8 +242,14 @@ def write_view(res: BuildResult, s: Settings, meshes: dict, asm: dict, shapes: d
         "parts": parts,
         "assembly": assembly,
         "plate": {"nozzles": [{"name": z.name, "x": z.x, "y": z.y, "height": z.height} for z in s.nozzles]},
-        "report": rep,
-        "spec": [vars(f) for f in res.spec_findings],
+        "report": {
+            "material": s.material.key,
+            "parts": {r.name: {"status": r.status, "stats": r.stats, "findings": [vars(f) for f in r.findings]}
+                      for r in res.reports},
+            "assembly": [vars(f) for f in res.assembly_findings],
+            "spec": [vars(f) for f in res.spec_findings],
+            "slice": _slice_summary(res, s),
+        },
         "features": features or [],
         "params": {k: v for k, v in vars(p).items()} if p else {},
     }
@@ -294,6 +298,28 @@ def _fmt_time(sec: float) -> str:
     return f"{h}h {m:02d}m" if h else f"{m}m {int(sec) % 60:02d}s"
 
 
+def _slice_summary(res: BuildResult, s: Settings) -> dict | None:
+    sl = res.slice
+    if sl is None:
+        return {"skipped": True} if s.slicer == "none" else None
+    out = {"ok": sl.ok, "message": sl.message, "warnings": sl.warnings}
+    if sl.ok:
+        nozzles = ", ".join(s.nozzles[i - 1].name for i in sl.filament_map if 0 < i <= len(s.nozzles)) or "unknown"
+        out.update(time=_fmt_time(sl.print_time_s or 0), filament_g=round(sl.filament_g or 0, 1), plates=sl.plates,
+                   nozzle=nozzles, material=s.material.key)
+    return out
+
+
+def _md_finding(f: checks.Finding, label: str, limit: int = 4) -> list[str]:
+    lines = [f"- {f.status} {label}{f.detail}"]
+    for it in f.items[:limit]:
+        bits = [it["text"], it.get("where"), it.get("at") and "near ({})".format(", ".join(f"{c:g}" for c in it["at"]))]
+        lines.append("  - " + ", ".join(b for b in bits if b))
+    if len(f.items) > limit:
+        lines.append(f"  - and {len(f.items) - limit} more")
+    return lines
+
+
 def write_report(res: BuildResult, p: SimpleNamespace, s: Settings) -> Path:
     out = res.project / "out"
     lines = [f"# Build report: {res.project.name}", "", f"Overall: **{res.status}**", "",
@@ -302,20 +328,20 @@ def write_report(res: BuildResult, p: SimpleNamespace, s: Settings) -> Path:
     for r in res.reports:
         st = r.stats
         lines += [f"## {r.name}: {r.status}", "",
-                  "bbox {} x {} x {} mm, volume {} cm^3, bed contact {} mm^2, bodies {}".format(
+                  "bbox {} × {} × {} mm, volume {} cm³, bed contact {} mm², bodies {}".format(
                       *st["bbox"], st["volume_cm3"], st["bed_contact_mm2"], st["bodies"]), ""]
-        lines += [f"- {f.status} {f.check}: {f.detail}" for f in r.findings] + [""]
+        lines += [x for f in r.findings for x in _md_finding(f, f"{f.check}: ")] + [""]
     if res.assembly_findings:
-        lines += ["## assembly", ""] + [f"- {f.status} {f.check}: {f.detail}" for f in res.assembly_findings] + [""]
+        lines += ["## assembly", ""] + [x for f in res.assembly_findings for x in _md_finding(f, f"{f.check}: ")] + [""]
     if res.spec_findings:
-        lines += ["## spec checks", ""] + [f"- {f.status} {f.detail}" for f in res.spec_findings] + [""]
+        lines += ["## spec checks", ""] + [x for f in res.spec_findings for x in _md_finding(f, "")] + [""]
     if res.slice:
         sl = res.slice
         lines += ["## slice", ""]
         if sl.ok:
-            nozzles = ", ".join(s.nozzles[i - 1].name for i in sl.filament_map if 0 < i <= len(s.nozzles)) or "unknown"
+            sm = _slice_summary(res, s)
             plates = f", {sl.plates} plates" if sl.plates > 1 else ""
-            lines += [f"- time {_fmt_time(sl.print_time_s or 0)}, filament {sl.filament_g or 0:.1f} g, nozzle {nozzles}{plates}",
+            lines += [f"- time {sm['time']}, filament {sm['filament_g']:.1f} g, nozzle {sm['nozzle']}{plates}",
                       f"- project: {sl.project_3mf.relative_to(res.project)}"]
             lines += [f"- WARN slicer: {w}" for w in sl.warnings]
         else:

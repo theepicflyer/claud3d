@@ -13,82 +13,150 @@
 <body>
 <div id="app">
   <main id="stage">
-    <div id="toolbar">
-      <div class="group" id="modes">
-        <button data-mode="nav" class="on" title="Left-drag rotates, like Bambu Studio. Space switches between this and the last tool; Esc comes back here."><kbd>Space</kbd> Navigate</button>
-        <button data-mode="pin" title="Pin a comment to a point (1)"><kbd>1</kbd> Pin</button>
-        <button data-mode="circle" title="Circle an area and comment on it (2)"><kbd>2</kbd> Circle</button>
-        <button data-mode="measure" title="Measure between two points (3)"><kbd>3</kbd> Measure</button>
-      </div>
-      <div class="group" id="layouts">
-        <button data-layout="print" class="on" title="Parts as laid out on the build plate">Plate</button>
-        <button data-layout="assembly" title="Parts in assembled positions">Assembly</button>
-      </div>
-      <div class="group" id="cams">
-        <button data-cam="iso">Iso</button>
-        <button data-cam="front">Front</button>
-        <button data-cam="right">Right</button>
-        <button data-cam="top">Top</button>
-        <button data-cam="fit" title="Fit view (F)">Fit</button>
-      </div>
-      <div class="group" id="section">
-        <label>Section
-          <select id="sec-axis">
-            <option value="">off</option><option value="x">X</option><option value="y">Y</option><option value="z">Z</option>
-          </select>
-        </label>
-        <input id="sec-pos" type="range" min="0" max="1000" value="500" disabled>
-        <button id="sec-flip" title="Flip which side is kept" disabled>Flip</button>
-      </div>
-    </div>
     <canvas id="gl"></canvas>
     <canvas id="overlay"></canvas>
     <div id="labels"></div>
     <div id="snap" class="snap" hidden></div>
-    <div id="readout">
-      <div id="cursor-out"></div>
-      <div id="measure-out" hidden></div>
+    <div id="hud">
+      <div id="toolbar">
+        <div class="group" id="modes">
+          <button data-mode="nav" class="on" title="Left-drag rotates, like Bambu Studio. Space switches between this and the last tool; Esc comes back here."><kbd>Space</kbd> Navigate</button>
+          <button data-mode="pin" title="Pin a comment to a point (1)"><kbd>1</kbd> Pin</button>
+          <button data-mode="circle" title="Circle an area and comment on it (2)"><kbd>2</kbd> Circle</button>
+          <button data-mode="measure" title="Measure between two points (3)"><kbd>3</kbd> Measure</button>
+        </div>
+        <div class="group" id="layouts" title="Tab switches between Plate and Assembly">
+          <button data-layout="print" class="on" title="Parts as laid out on the build plate (Tab)"><kbd>Tab</kbd> Plate</button>
+          <button data-layout="assembly" title="Parts in assembled positions (Tab)">Assembly</button>
+        </div>
+        <div class="group" id="cams">
+          <button data-cam="iso">Iso</button>
+          <button data-cam="front">Front</button>
+          <button data-cam="right">Right</button>
+          <button data-cam="top">Top</button>
+          <button data-cam="fit" title="Fit view (F)"><kbd>F</kbd> Fit</button>
+        </div>
+        <div class="group" id="section">
+          <label>Section
+            <select id="sec-axis">
+              <option value="">off</option><option value="x">X</option><option value="y">Y</option><option value="z">Z</option>
+            </select>
+          </label>
+          <input id="sec-pos" type="range" min="0" max="1000" value="500" disabled>
+          <button id="sec-flip" title="Flip which side is kept" disabled>Flip</button>
+        </div>
+      </div>
+      <div id="banner" hidden></div>
+      <div id="readout">
+        <div id="cursor-out" hidden></div>
+        <div id="measure-out" hidden></div>
+      </div>
     </div>
     <div id="tour" hidden></div>
-    <div id="banner" hidden></div>
-    <div id="hint"></div>
+    <button id="help-btn" title="Controls and shortcuts (?)"><kbd>?</kbd> Controls</button>
     <canvas id="triad" width="92" height="92"></canvas>
   </main>
   <aside id="side">
     <header>
       <div class="title"><span id="project"></span><span id="badge" class="badge"></span></div>
-      <div id="buildinfo" class="muted"></div>
-      <button id="open-studio" class="link small" title="Open the sliced project in Bambu Studio (B)">Open in Bambu Studio</button>
+      <div id="buildinfo" class="muted small"></div>
+      <button id="open-studio" class="pill" title="Open the sliced project in Bambu Studio (B)"><kbd>B</kbd> Open in Bambu Studio</button>
     </header>
-    <section>
-      <h2>Parts</h2>
-      <ul id="parts"></ul>
-    </section>
-    <section id="report-sec">
-      <h2>Report</h2>
-      <ul id="report"></ul>
-    </section>
-    <section id="features-sec" hidden>
-      <h2>Features
-        <span><label class="muted small"><input type="checkbox" id="show-features" checked> labels</label>
-        <button id="tour-start" class="link small">▶ Walkthrough</button></span>
-      </h2>
-      <ul id="features"></ul>
-      <details class="small"><summary class="muted">All parameters</summary><div id="params" class="params"></div></details>
-    </section>
-    <section id="comments-sec">
-      <h2>Comments
-        <label class="muted small"><input type="checkbox" id="show-resolved"> show resolved</label>
-      </h2>
-      <button id="add-general" class="link">+ General comment on this view</button>
-      <div id="drafts"></div>
-      <div id="threads"></div>
-    </section>
+    <div id="side-scroll">
+      <section class="sec" data-sec="parts">
+        <div class="sec-head">
+          <button class="sec-toggle"><span class="chev"></span><span class="sec-title">Parts</span><span class="sec-sum" id="parts-sum"></span></button>
+          <div class="sec-tools"><button id="parts-all" class="link small" hidden>Show all</button></div>
+        </div>
+        <div class="sec-body">
+          <ul id="parts"></ul>
+          <div class="muted small note">Click a name to show only that part; click it again to show all.</div>
+        </div>
+      </section>
+      <section class="sec" data-sec="report">
+        <div class="sec-head">
+          <button class="sec-toggle"><span class="chev"></span><span class="sec-title">Report</span><span class="sec-sum" id="report-sum"></span></button>
+        </div>
+        <div class="sec-body" id="report"></div>
+      </section>
+      <section class="sec" data-sec="features" id="features-sec" hidden>
+        <div class="sec-head">
+          <button class="sec-toggle"><span class="chev"></span><span class="sec-title">Features</span><span class="sec-sum" id="features-sum"></span></button>
+          <div class="sec-tools">
+            <label class="muted small"><input type="checkbox" id="show-features" checked> labels</label>
+            <button id="tour-start" class="link small">▶ Walkthrough</button>
+          </div>
+        </div>
+        <div class="sec-body">
+          <ul id="features"></ul>
+          <details class="small params-all"><summary class="muted">All parameters</summary><div id="params" class="params"></div></details>
+        </div>
+      </section>
+      <section class="sec open fixed" data-sec="comments" id="comments-sec">
+        <div class="sec-head">
+          <div class="sec-toggle"><span class="sec-title">Comments</span><span class="sec-sum" id="comments-sum"></span></div>
+          <div class="sec-tools"><label class="muted small"><input type="checkbox" id="show-resolved"> show resolved</label></div>
+        </div>
+        <div class="sec-body">
+          <button id="add-general" class="link">+ General comment on this view</button>
+          <div id="drafts"></div>
+          <div id="threads"></div>
+        </div>
+      </section>
+    </div>
     <footer>
       <button id="send" disabled>Send to Claude</button>
       <div class="muted small" id="send-note"></div>
     </footer>
   </aside>
+</div>
+<div id="help" class="modal" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="help-title">
+    <div class="modal-head">
+      <h1 id="help-title">Controls and shortcuts</h1>
+      <button id="help-close" class="icon" title="Close (Esc)">×</button>
+    </div>
+    <div class="help-grid">
+      <section>
+        <h3>Mouse</h3>
+        <dl>
+          <dt>Left-drag</dt><dd>Rotate, while navigating</dd>
+          <dt>Right-drag, middle-drag</dt><dd>Pan</dd>
+          <dt>Wheel</dt><dd>Zoom</dd>
+          <dt>Ctrl + right-drag</dt><dd>Rotate while a tool has the left button</dd>
+        </dl>
+      </section>
+      <section>
+        <h3>Tools</h3>
+        <dl>
+          <dt><kbd>Space</kbd></dt><dd>Switch between Navigate and the last tool</dd>
+          <dt><kbd>1</kbd> Pin</dt><dd>Click the model to pin a comment</dd>
+          <dt><kbd>2</kbd> Circle</dt><dd>Drag a loop around an area to comment on it</dd>
+          <dt><kbd>3</kbd> Measure</dt><dd>Click two points. Snaps to vertices, circle centres, edge midpoints and edges; hold Ctrl to place a point freely</dd>
+          <dt><kbd>Esc</kbd></dt><dd>Cancel what you're doing, then go back to Navigate</dd>
+        </dl>
+      </section>
+      <section>
+        <h3>View</h3>
+        <dl>
+          <dt><kbd>Tab</kbd></dt><dd>Switch between Plate and Assembly; each keeps its own camera</dd>
+          <dt><kbd>F</kbd></dt><dd>Fit the view</dd>
+          <dt>Section</dt><dd>Cut the model along X, Y or Z</dd>
+          <dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>Step through the feature walkthrough</dd>
+        </dl>
+      </section>
+      <section>
+        <h3>Review</h3>
+        <p>Comments stay as drafts in this browser until you press <b>Send to Claude</b>. Claude answers in the threads and rebuilds; the page reloads the model by itself.</p>
+        <p>Click a location in the report to fly to it.</p>
+        <dl>
+          <dt><kbd>B</kbd></dt><dd>Open the sliced project in Bambu Studio</dd>
+          <dt><kbd>?</kbd></dt><dd>Show this window</dd>
+        </dl>
+      </section>
+    </div>
+    <div class="modal-foot"><button id="help-ok" class="primary">Got it</button></div>
+  </div>
 </div>
 <script type="module" src="/static/app.js"></script>
 </body>
