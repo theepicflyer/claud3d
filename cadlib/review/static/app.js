@@ -1032,11 +1032,39 @@ function focusCard(key, edit) {
 }
 
 const replyOpen = new Set();
+const SHOT_BUTTON = `<button class="shot" title="Screenshot: hover to preview, click to open"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+  <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/>
+  <circle cx="5.5" cy="6.3" r="1.3" fill="currentColor"/>
+  <path d="M2 12.5l4-4 3 3 2-2 3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg></button>`;
+const shotPreview = Object.assign(document.createElement('img'), { id: 'shot-preview', alt: '', hidden: true });
+document.body.append(shotPreview);
+// Hovering shows the screenshot beside the card; clicking opens it full size. Draft screenshots are data URLs,
+// which browsers won't open as a page, so they go through a blob URL.
+function wireShot(btn, src) {
+  const place = () => {
+    const r = btn.getBoundingClientRect();
+    const h = shotPreview.offsetHeight || 220;
+    shotPreview.style.right = `${Math.max(8, window.innerWidth - r.left + 10)}px`;
+    shotPreview.style.top = `${THREE.MathUtils.clamp(r.top + r.height / 2 - h / 2, 8, window.innerHeight - h - 8)}px`;
+  };
+  btn.addEventListener('mouseenter', () => {
+    shotPreview.onload = place;
+    shotPreview.src = src;
+    shotPreview.hidden = false;
+    place();
+  });
+  btn.addEventListener('mouseleave', () => { shotPreview.hidden = true; });
+  btn.addEventListener('click', async () => {
+    const url = src.startsWith('data:') ? URL.createObjectURL(await (await fetch(src)).blob()) : src;
+    window.open(url, '_blank');
+  });
+}
 function renderComments() {
+  shotPreview.hidden = true;
   const drafts = $('drafts');
   drafts.innerHTML = state.drafts.map((d, i) => `
     <div class="card draft" data-key="${d.key}">
-      <div class="head"><span class="num">new ${i + 1}</span><span class="where" title="${esc(anchorText(d.anchor))}">${esc(anchorText(d.anchor))}</span><span class="status draft">Draft</span></div>
+      <div class="head"><span class="num">new ${i + 1}</span><span class="where">${esc(anchorText(d.anchor))}</span>${d.screenshot ? SHOT_BUTTON : ''}<span class="status draft">Draft</span></div>
       <textarea placeholder="What should change here?">${esc(d.text)}</textarea>
       <div class="actions"><button data-act="goto">View</button><button data-act="delete">Delete</button></div>
     </div>`).join('');
@@ -1044,6 +1072,8 @@ function renderComments() {
     const d = state.drafts.find((x) => x.key === card.dataset.key);
     card.querySelector('textarea').addEventListener('input', (e) => { d.text = e.target.value; persist(); updateSend(); });
     card.querySelector('[data-act="goto"]').addEventListener('click', () => goToCamera(d.camera));
+    const shot = card.querySelector('.shot');
+    if (shot) wireShot(shot, d.screenshot);
     card.querySelector('[data-act="delete"]').addEventListener('click', () => {
       state.drafts = state.drafts.filter((x) => x !== d);
       persist(); rebuildMarkers(); renderComments();
@@ -1059,13 +1089,12 @@ function renderComments() {
     const replying = t.status === 'open' || r.text || replyOpen.has(t.id);
     return `
     <div class="card thread ${t.status}" data-key="t${t.id}" data-id="${t.id}">
-      <div class="head"><span class="num">#${t.id}</span><span class="where" title="${esc(anchorText(t.anchor))}">${esc(anchorText(t.anchor))}</span>
+      <div class="head"><span class="num">#${t.id}</span><span class="where">${esc(anchorText(t.anchor))}</span>${t.screenshot ? SHOT_BUTTON : ''}
         <span class="status ${status}${r.status ? ' unsent' : ''}" ${r.status ? 'title="Changes when you send"' : ''}>${cap(status)}${r.status ? ' · unsent' : ''}</span></div>
       <div class="msgs">${t.messages.map((m) => `<div class="msg ${m.by}"><div class="who">${m.by === 'claude' ? 'Claude' : 'You'}</div><div class="text">${esc(m.text)}</div></div>`).join('')}</div>
       ${replying ? `<textarea placeholder="Reply…">${esc(r.text || '')}</textarea>` : ''}
       <div class="actions">
         ${t.camera ? '<button data-act="goto">View</button>' : ''}
-        ${t.screenshot ? '<button data-act="shot">Screenshot</button>' : ''}
         ${replying ? '' : '<button data-act="reply">Reply</button>'}
         <button data-act="status">${status === 'resolved' ? 'Reopen' : 'Resolve'}</button>
       </div>
@@ -1076,7 +1105,8 @@ function renderComments() {
     const r = () => (state.replies[t.id] ||= {});
     card.querySelector('textarea')?.addEventListener('input', (e) => { r().text = e.target.value; persist(); updateSend(); });
     card.querySelector('[data-act="goto"]')?.addEventListener('click', () => goToCamera(t.camera));
-    card.querySelector('[data-act="shot"]')?.addEventListener('click', () => window.open(`/review/${t.screenshot}`, '_blank'));
+    const shot = card.querySelector('.shot');
+    if (shot) wireShot(shot, `/review/${t.screenshot}`);
     card.querySelector('[data-act="reply"]')?.addEventListener('click', () => {
       replyOpen.add(t.id);
       renderComments();
