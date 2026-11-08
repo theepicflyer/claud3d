@@ -61,14 +61,38 @@ def cmd_open(a) -> int:
     return 0
 
 
+NATIVE = ROOT / "review-native"
+
+
+def native_app() -> list[str] | None:
+    """Builds the experimental native review app if needed and returns its command line."""
+    exe = NATIVE / "target" / "release" / ("cad-review.exe" if sys.platform == "win32" else "cad-review")
+    if shutil.which("cargo"):
+        if not exe.exists():
+            print("building the native review app (the first build takes a few minutes)...", file=sys.stderr, flush=True)
+        r = subprocess.run(["cargo", "build", "--release", "--quiet", "--manifest-path", str(NATIVE / "Cargo.toml")],
+                           stdout=sys.stderr)
+        if r.returncode != 0:
+            return None
+    elif not exe.exists():
+        print("the native review app needs Rust (cargo) to build; see review-native/README.md", file=sys.stderr)
+        return None
+    return [str(exe)]
+
+
 def cmd_review(a) -> int:
     from .review.server import serve
     project = resolve_project(a.project)
     if not (project / "out" / "view.json").exists():
         print("no build yet; run `uv run cad build` first", file=sys.stderr)
         return 1
+    native = None
+    if a.native:
+        native = native_app()
+        if native is None:
+            return 1
     try:
-        serve(project, a.port, open_browser=not a.no_open, keep_running=a.keep)
+        serve(project, a.port, open_browser=not a.no_open, keep_running=a.keep, native=native)
     except OSError as e:
         print(f"could not start the review server: {e}. Is another review of this project still running?",
               file=sys.stderr)
@@ -134,6 +158,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--port", type=int, help="default is stable per project")
     s.add_argument("--no-open", action="store_true", help="don't launch a browser")
     s.add_argument("--keep", action="store_true", help="keep serving after comments are sent")
+    s.add_argument("--native", action="store_true", help="open the experimental native app instead of a browser tab")
     s.set_defaults(fn=cmd_review)
 
     s = sub.add_parser("comments", help="print review threads (open ones by default)")

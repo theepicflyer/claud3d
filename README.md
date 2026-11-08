@@ -41,8 +41,9 @@ You need [uv](https://docs.astral.sh/uv/) and [Claude Code](https://claude.com/c
 
 - [CLAUDE.md](CLAUDE.md) is how Claude works on a part. It also lists the `cad` commands and the review app's features.
 - [`projects/`](projects) has three example projects, each with its requirements, decisions and review history.
+- [`review-native/`](review-native) is an experimental desktop review app built with [Rune](https://github.com/anomalyco/rune): `uv run cad review <name> --native`.
 - Your printer setup (`printer.local.toml`, `CLAUDE.local.md`) and private projects (`private/`) are gitignored, so you can fork this repo publicly.
 
 ## License
 
-[MIT](LICENSE). The vendored [three.js](https://threejs.org/) and [three-mesh-bvh](https://github.com/gkjohnson/three-mesh-bvh) are MIT licensed by their authors.
+[MIT](LICENSE). The vendored [three.js](https://threejs.org/) and [three-mesh-bvh](https://github.com/gkjohnson/three-mesh-bvh) are MIT licensed by their authors, as is [Rune](https://github.com/anomalyco/rune), which the native app builds against.

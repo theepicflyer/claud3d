@@ -55,6 +55,37 @@ def test_server_round_trip(project):
     srv.server_close()
 
 
+def test_native_app_sends_and_the_review_ends(project, tmp_path, capsys):
+    import sys
+
+    from cadlib.review.server import serve
+    # Stands in for the native app: post one comment to the server it was given, as Send does.
+    fake = tmp_path / "fake_app.py"
+    fake.write_text(
+        "import json, sys, urllib.request\n"
+        "server = sys.argv[sys.argv.index('--server') + 1]\n"
+        "body = json.dumps({'new': [{'text': 'from native', 'anchor': None}]}).encode()\n"
+        "req = urllib.request.Request(server + '/api/send', body, {'Content-Type': 'application/json'})\n"
+        "assert json.loads(urllib.request.urlopen(req).read())['closing']\n")
+    th = threading.Thread(target=serve, args=(project, 0), kwargs={"native": [sys.executable, str(fake)]}, daemon=True)
+    th.start()
+    th.join(timeout=20)
+    assert not th.is_alive()
+    out = capsys.readouterr().out
+    assert "1 new comment(s)" in out and "from native" in out and "closed without sending" not in out
+
+
+def test_closing_the_native_app_ends_the_review(project, capsys):
+    import sys
+
+    from cadlib.review.server import serve
+    th = threading.Thread(target=serve, args=(project, 0), kwargs={"native": [sys.executable, "-c", "pass"]}, daemon=True)
+    th.start()
+    th.join(timeout=20)
+    assert not th.is_alive()
+    assert "closed without sending" in capsys.readouterr().out
+
+
 def test_topology_exports_snap_features():
     from build123d import Box, Cylinder
 

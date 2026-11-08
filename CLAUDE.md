@@ -20,6 +20,7 @@ cadlib/               shared library and the `cad` CLI
   features.py         FDM helpers: screw/nut tables, teardrop, nut trap
   review/             browser review app (server, static files, vendored three.js r170 and three-mesh-bvh 0.8.3) and comment store
   template/           copied by `cad new`
+review-native/        experimental native review app (Rust, Rune); see its README
 projects/<name>/      public projects
   CLAUDE.md           the project's requirements, interfaces, print notes, decisions, print log
   model.py            the parametric model
@@ -99,7 +100,7 @@ def check(p, s, parts)             # expected; yield (ok, "R1 ...") per requirem
 
 ### 6. Review with the user
 
-1. Run `uv run cad review <name>` as a **background** Bash command and tell the user it's open. It serves on a fixed per-project port. A browser tab opens unless an existing tab reconnects within 4 s.
+1. Run `uv run cad review <name>` as a **background** Bash command and tell the user it's open. It serves on a fixed per-project port. A browser tab opens unless an existing tab reconnects within 4 s. With `--native` it opens the experimental native app (`review-native/`) instead of a tab; sending works the same, and closing its window ends the review.
 2. The user inspects the model, pins, circles and measures, writes comments, and presses "Send to Claude". The server then exits and prints the comments, which re-invokes Claude.
 3. Each comment shows:
    - its id and part
@@ -129,7 +130,7 @@ Record the result in the project's Print log. If fits come out consistently tigh
 ```
 uv run cad new <name> [--private]
 uv run cad build <name> [-p key=value ...] [--no-slice] [--no-render] [--open]
-uv run cad review <name> [--no-open] [--keep] [--port N]
+uv run cad review <name> [--no-open] [--keep] [--port N] [--native]
 uv run cad comments <name> [--all]
 uv run cad reply <name> <id> "text" [--resolve | --reopen]
 uv run cad open <name> [--step]
@@ -184,6 +185,7 @@ Findings that have locations list them underneath, in the part's print frame (th
 - **Reloading:** an open tab reloads the model when `view.json` changes. It reloads itself, keeping the camera and unsent drafts, when files in `cadlib/review/static/` change.
 - **`--keep`:** keeps serving after a send, for example while rebuilding repeatedly.
 - **Testing UI changes:** run on a separate `--port` so tests don't touch the user's tab. Playwright saves screenshots only under the repo root (`.playwright-mcp/` is gitignored).
+- **Native app (experimental):** `review-native/` is a Rust app built with Rune that reads the same files and posts to the same server. It differs from the browser app in a few ways: Shift- or middle-drag pans (Rune has no right-drag), the wheel zooms toward the pointer, 2 measures, there's no circle tool, and drafts aren't kept across restarts. Check changes to it headlessly with `--snap`, `--scene` and `--script` and `cargo test`, as its README describes, rather than opening windows on the user's desktop.
 
 ### FDM design rules (0.4 mm nozzle, 0.2 mm layers)
 
