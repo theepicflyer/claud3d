@@ -17,7 +17,7 @@ const fmt = (v) => '(' + v.map((x) => x.toFixed(1)).join(', ') + ')';
 
 const state = {
   project: null, view: null, builtAt: null, threads: [], version: null, connected: true,
-  layout: 'print', mode: 'pin', showResolved: false,
+  layout: 'print', mode: 'nav', tool: 'pin', showResolved: false,
   parts: {},          // key -> {name, key, group, front, back, edges, color, frame, visible}
   drafts: [],         // {key, anchor, camera, text, screenshot}
   replies: {},        // thread id -> {text, status}
@@ -41,11 +41,14 @@ const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 20000);
 camera.up.set(0, 0, 1);
 camera.position.set(250, -250, 200);
 scene.add(camera);
+// Mouse navigation follows Bambu Studio: left-drag rotates, right- or middle-drag pans, the wheel zooms to the view center.
+// The comment tools take over the left button (see setMode); OrbitControls turns Ctrl+right-drag into rotate.
+const ROTATE_DEG_PER_PX = 0.8;
+const ZOOM_PER_NOTCH = 1.1;
 const controls = new OrbitControls(camera, canvas);
 controls.screenSpacePanning = true;
-// Left button belongs to the comment tools. Right-drag pans; OrbitControls turns Ctrl+right-drag into rotate.
-// Shift+right-drag can't be used: Firefox-based browsers always open their context menu on Shift+right-click.
-controls.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
+controls.enableZoom = false;
+controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN };
 scene.add(new THREE.HemisphereLight(0xffffff, 0x777777, 1.7));
 const headlight = new THREE.DirectionalLight(0xffffff, 1.5);
 headlight.position.set(0.4, 0.6, 1);
@@ -66,6 +69,8 @@ function resize() {
   overlay.height = h * devicePixelRatio;
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+  // OrbitControls turns a drag of one canvas height into rotateSpeed full turns; Bambu turns a fixed angle per pixel.
+  controls.rotateSpeed = (h * THREE.MathUtils.degToRad(ROTATE_DEG_PER_PX)) / (2 * Math.PI);
 }
 window.addEventListener('resize', resize);
 
@@ -702,11 +707,20 @@ function updateLabels() {
 
 // ---------- interaction ----------
 let lasso = null;
+// 'nav' gives the left button to rotation; the tools ('pin', 'circle', 'measure') take it over. Space toggles back to state.tool.
 function setMode(mode) {
+  // A half-done measurement survives a trip to Navigate and back, so the view can be turned between the two clicks.
+  const keep = mode === 'nav' || mode === state.tool;
   state.mode = mode;
+  if (mode !== 'nav') state.tool = mode;
+  controls.mouseButtons.LEFT = mode === 'nav' ? THREE.MOUSE.ROTATE : null;
   stage.className = `mode-${mode}`;
   document.querySelectorAll('#modes button').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
-  cancelGesture();
+  if (!keep) { cancelGesture(); return; }
+  lasso = null;
+  showSnap(null);
+  if (state.measure) drawLiveMeasure();
+  setHint();
 }
 function cancelGesture() {
   lasso = null;
@@ -715,8 +729,9 @@ function cancelGesture() {
   showSnap(null);
   setHint();
 }
-const NAV = 'Right-drag pan · Ctrl+right-drag or middle-drag rotate · wheel zoom';
+const NAV = 'Right-drag pan · wheel zoom · Space to navigate';
 const HINTS = {
+  nav: 'Left-drag rotate · right- or middle-drag pan · wheel zoom. Space or 1/2/3 to comment or measure.',
   pin: `Click the model to pin a comment. ${NAV}`,
   circle: `Drag a loop around an area to comment on it. ${NAV}`,
   measure: `Click two points to measure. Snaps to vertices, circle centers, edge midpoints and edges; hold Ctrl to place freely. ${NAV}`,
@@ -725,6 +740,15 @@ function setHint(html) { $('hint').innerHTML = html ?? HINTS[state.mode]; $('hin
 
 let down = null;
 stage.addEventListener('contextmenu', (e) => e.preventDefault());
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  // Read deltaMode before deltaY: Firefox then reports a mouse wheel in lines (3 per notch) instead of pixels.
+  const perNotch = [100, 3, 1][e.deltaMode] ?? 100;
+  const notches = THREE.MathUtils.clamp(e.deltaY / perNotch, -4, 4);
+  const offset = camera.position.clone().sub(controls.target).multiplyScalar(ZOOM_PER_NOTCH ** notches);
+  camera.position.copy(controls.target).add(offset.clampLength(1, 10000));
+  controls.update();
+}, { passive: false });
 canvas.addEventListener('pointerdown', (e) => {
   down = { x: e.clientX, y: e.clientY, button: e.button, moved: 0 };
   if (state.mode === 'circle' && e.button === 0) {
@@ -836,18 +860,27 @@ function measureClick(x, y, free) {
 }
 
 window.addEventListener('keydown', (e) => {
-  if (e.target.matches('textarea, input, select')) {
+  if (e.target.matches('textarea, select, input:not([type=checkbox])')) {
     if (e.key === 'Escape') e.target.blur();
     return;
   }
   const k = e.key.toLowerCase();
   const tool = { 1: 'pin', 2: 'circle', 3: 'measure' }[k];
-  if (tool) setMode(tool);
+  if (k === ' ') {
+    // Blur so the keyup doesn't also click a focused button or checkbox.
+    e.preventDefault();
+    document.activeElement?.blur();
+    if (!e.repeat) setMode(state.mode === 'nav' ? state.tool : 'nav');
+  } else if (tool) setMode(tool);
   else if (k === 'f') setView('fit');
   else if (k === 'b') openStudio();
   else if (k === 'arrowright' && state.tour !== null) tourStep(1);
   else if (k === 'arrowleft' && state.tour !== null) tourStep(-1);
-  else if (k === 'escape') { if (state.tour !== null) endTour(); else cancelGesture(); }
+  else if (k === 'escape') {
+    if (state.tour !== null) endTour();
+    else if (lasso || state.measure) cancelGesture();
+    else setMode('nav');
+  }
 });
 document.querySelectorAll('#modes button').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
 document.querySelectorAll('#layouts button').forEach((b) => b.addEventListener('click', () => {
@@ -1263,7 +1296,7 @@ $('tour-start').addEventListener('click', startTour);
 $('show-features').addEventListener('change', (e) => { state.showFeatures = e.target.checked; rebuildMarkers(); });
 
 resize();
-setMode('pin');
+setMode('nav');
 loadState().then(() => {
   if (!state.view) showBanner('No build yet. Run `uv run cad build` for this project.');
 }).catch((e) => showBanner(`Failed to load: ${e}`));
