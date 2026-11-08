@@ -9,7 +9,7 @@ THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 const PALETTE = [0x5a8cdc, 0xeb963c, 0x6eb96e, 0xd25a6e, 0xa078c8, 0x78bec8];
-const COLORS = { draft: 0xd9731a, open: 0x2f6fd6, resolved: 0x8a8a8f, measure: 0x222222, feature: 0x139c8c };
+const COLORS = { draft: 0xd9731a, open: 0x2f6fd6, resolved: 0x8a8a8f, measure: 0x222222, feature: 0x139c8c, locate: 0xc2255c };
 const AXIS_COLORS = { x: 0xd23c3c, y: 0x2e9b45, z: 0x2f6fd6 };
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -26,6 +26,7 @@ const state = {
   showFeatures: true,
   tour: null,         // index of the feature being shown in the walkthrough
   focus: null,
+  locate: null,       // {i, world: () => Vector3|null, label}: a report location being shown
 };
 
 // ---------- scene ----------
@@ -364,6 +365,18 @@ function setView(name) {
   controls.update();
 }
 const getCamera = () => ({ position: camera.position.toArray(), target: controls.target.toArray(), layout: state.layout });
+// Plate and Assembly each keep their own camera, so Tab flips between two views of the model.
+const layoutCams = {};
+function setLayout(layout) {
+  if (layout === state.layout) return;
+  if (layout === 'assembly' && !Object.keys(state.view?.assembly || {}).length) { flash('This model has no assembly.'); return; }
+  layoutCams[state.layout] = getCamera();
+  tween = null;
+  state.layout = layout;
+  applyLayout();
+  if (layoutCams[layout]) goToCamera(layoutCams[layout]);
+  else setView('iso');
+}
 function goToCamera(c) {
   if (!c) return;
   if (c.layout && c.layout !== state.layout) { state.layout = c.layout; applyLayout(); }
@@ -432,15 +445,15 @@ function anchorBase(hit) {
 const round3 = (x) => Math.round(x * 1000) / 1000;
 
 // ---------- markers & labels ----------
-const labels = []; // {el, key, world: () => Vector3|null}
+const labels = []; // {el, key, world: () => Vector3|null, feature?, dot?}
 function clearLabels() { labels.forEach((l) => l.el.remove()); labels.length = 0; }
-function addLabel(text, cls, worldFn, onClick, key) {
+function addLabel(text, cls, worldFn, onClick, key, extra = {}) {
   const el = document.createElement('div');
   el.className = `label ${cls}`;
   el.textContent = text;
   if (onClick) el.addEventListener('click', onClick);
   $('labels').appendChild(el);
-  labels.push({ el, key, world: worldFn });
+  labels.push({ el, key, world: worldFn, ...extra });
 }
 
 function partForAnchor(a) {
@@ -509,6 +522,21 @@ function rebuildMarkers() {
   });
   drawLiveMeasure();
   placeFeatures();
+  placeLocate();
+}
+
+const locGroup = new THREE.Group();
+scene.add(locGroup);
+function placeLocate() {
+  locGroup.clear();
+  const w = state.locate?.world();
+  if (!w) return;
+  const dot = new THREE.Mesh(DOT, new THREE.MeshBasicMaterial({ color: COLORS.locate, depthTest: false, transparent: true }));
+  dot.userData.screenDot = 1.4;
+  dot.position.copy(w);
+  dot.renderOrder = 12;
+  locGroup.add(dot);
+  addLabel(state.locate.label, 'locate', () => state.locate?.world() || null, clearLocate, 'loc');
 }
 
 const liveMeasure = new THREE.Group();
@@ -625,12 +653,11 @@ const num = (v) => (Math.abs(v) < 0.005 ? '0.00' : v.toFixed(2));
 function renderReadout() {
   const sn = state.hoverSnap;
   const cur = $('cursor-out');
+  cur.hidden = !sn;
   if (sn) {
     const [x, y, z] = sn.local.toArray();
-    cur.innerHTML = `<span class="what">${esc(sn.part.name)} · ${esc(snapLabel(sn))}</span>
+    cur.innerHTML = `<span class="what">${esc(sn.part.name)} · ${esc(snapLabel(sn))} <span class="muted">· part frame, mm</span></span>
       <span class="ax x">X <b>${num(x)}</b></span><span class="ax y">Y <b>${num(y)}</b></span><span class="ax z">Z <b>${num(z)}</b></span>`;
-  } else {
-    cur.innerHTML = '<span class="what muted">Hover the model for coordinates (part frame, mm)</span>';
   }
   const m = state.measure;
   const out = $('measure-out');
@@ -692,16 +719,38 @@ let labelFrame = 0;
 function updateLabels() {
   const r = canvas.getBoundingClientRect();
   const checkOcclusion = (labelFrame++ % 4) === 0;
+  const shown = [];
   for (const l of labels) {
     const w = l.world();
-    if (!w) { l.el.style.display = 'none'; continue; }
-    if (section.axis && clipPlane.distanceToPoint(w) < 0) { l.el.style.display = 'none'; continue; }
-    const p = w.project(camera);
-    if (p.z > 1) { l.el.style.display = 'none'; continue; }
+    const p = w && !(section.axis && clipPlane.distanceToPoint(w) < 0) ? w.clone().project(camera) : null;
+    if (!p || p.z > 1) {
+      l.el.style.display = 'none';
+      if (l.dot) l.dot.visible = false;
+      continue;
+    }
     l.el.style.display = '';
-    if (checkOcclusion) l.el.classList.toggle('occluded', !unoccluded(w.clone().unproject(camera)));
-    l.el.style.left = `${(p.x + 1) / 2 * r.width}px`;
-    l.el.style.top = `${(1 - p.y) / 2 * r.height}px`;
+    if (checkOcclusion || l.occluded === undefined) l.occluded = !unoccluded(w);
+    l.el.classList.toggle('occluded', l.occluded);
+    l.x = (p.x + 1) / 2 * r.width;
+    l.y = (1 - p.y) / 2 * r.height;
+    l.z = p.z;
+    l.el.style.left = `${l.x}px`;
+    l.el.style.top = `${l.y}px`;
+    shown.push(l);
+  }
+  // Feature labels give way: hidden when their point is behind the model or under a nearer label. Comment labels never do.
+  const rank = (l) => (!l.feature ? 0 : l.el.classList.contains('active') ? 1 : 2);
+  shown.sort((a, b) => rank(a) - rank(b) || a.z - b.z);
+  const taken = [];
+  for (const l of shown) {
+    l.w ||= l.el.offsetWidth;
+    l.h ||= l.el.offsetHeight;
+    const box = [l.x - l.w / 2, l.y - l.h * 1.3, l.x + l.w / 2, l.y - l.h * 0.3];
+    const yields = rank(l) === 2;
+    const hide = yields && (l.occluded || taken.some((t) => box[0] < t[2] && box[2] > t[0] && box[1] < t[3] && box[3] > t[1]));
+    l.el.classList.toggle('crowded', hide);
+    if (l.dot) l.dot.visible = !(yields && l.occluded);
+    if (!hide) taken.push(box);
   }
 }
 
@@ -720,23 +769,13 @@ function setMode(mode) {
   lasso = null;
   showSnap(null);
   if (state.measure) drawLiveMeasure();
-  setHint();
 }
 function cancelGesture() {
   lasso = null;
   octx.clearRect(0, 0, overlay.width, overlay.height);
   if (state.measure) { state.measure = null; drawLiveMeasure(); }
   showSnap(null);
-  setHint();
 }
-const NAV = 'Right-drag pan · wheel zoom · Space to navigate';
-const HINTS = {
-  nav: 'Left-drag rotate · right- or middle-drag pan · wheel zoom. Space or 1/2/3 to comment or measure.',
-  pin: `Click the model to pin a comment. ${NAV}`,
-  circle: `Drag a loop around an area to comment on it. ${NAV}`,
-  measure: `Click two points to measure. Snaps to vertices, circle centers, edge midpoints and edges; hold Ctrl to place freely. ${NAV}`,
-};
-function setHint(html) { $('hint').innerHTML = html ?? HINTS[state.mode]; $('hint').style.pointerEvents = html ? 'auto' : 'none'; }
 
 let down = null;
 stage.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -759,7 +798,15 @@ canvas.addEventListener('pointerdown', (e) => {
 canvas.addEventListener('pointermove', (e) => {
   if (down) down.moved = Math.max(down.moved, Math.hypot(e.clientX - down.x, e.clientY - down.y));
   if (lasso) { lasso.push([e.clientX, e.clientY]); drawLasso(); return; }
+  hoverInside = true;
   hoverAt(e.clientX, e.clientY);
+});
+canvas.addEventListener('pointerleave', () => {
+  if (down) return;
+  hoverInside = false;
+  state.hoverSnap = null;
+  showSnap(null);
+  if (state.measure) drawLiveMeasure(); else renderReadout();
 });
 canvas.addEventListener('pointerup', (e) => {
   const moved = down ? down.moved : 99;
@@ -776,6 +823,7 @@ canvas.addEventListener('pointerup', (e) => {
 });
 
 let hoverQueued = false;
+let hoverInside = false;
 let ctrlHeld = false;
 window.addEventListener('keydown', (e) => { if (e.key === 'Control') ctrlHeld = true; });
 window.addEventListener('keyup', (e) => { if (e.key === 'Control') ctrlHeld = false; });
@@ -784,6 +832,7 @@ function hoverAt(x, y) {
   hoverQueued = true;
   requestAnimationFrame(() => {
     hoverQueued = false;
+    if (!hoverInside) return;
     const sn = state.mode === 'measure' && !ctrlHeld ? snapAt(x, y) : pick(x, y);
     if (sn && !sn.kind) { sn.kind = 'face'; sn.face = faceInfo(sn.part, sn.local, sn.normal); }
     state.hoverSnap = sn;
@@ -860,18 +909,26 @@ function measureClick(x, y, free) {
 }
 
 window.addEventListener('keydown', (e) => {
+  if (!$('help').hidden) {
+    if (['Escape', 'Enter', '?'].includes(e.key)) { e.preventDefault(); closeHelp(); }
+    return;
+  }
   if (e.target.matches('textarea, select, input:not([type=checkbox])')) {
     if (e.key === 'Escape') e.target.blur();
     return;
   }
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
   const k = e.key.toLowerCase();
   const tool = { 1: 'pin', 2: 'circle', 3: 'measure' }[k];
-  if (k === ' ') {
+  if (k === ' ' || k === 'tab') {
     // Blur so the keyup doesn't also click a focused button or checkbox.
     e.preventDefault();
     document.activeElement?.blur();
-    if (!e.repeat) setMode(state.mode === 'nav' ? state.tool : 'nav');
+    if (e.repeat) return;
+    if (k === ' ') setMode(state.mode === 'nav' ? state.tool : 'nav');
+    else setLayout(state.layout === 'print' ? 'assembly' : 'print');
   } else if (tool) setMode(tool);
+  else if (k === '?') openHelp();
   else if (k === 'f') setView('fit');
   else if (k === 'b') openStudio();
   else if (k === 'arrowright' && state.tour !== null) tourStep(1);
@@ -879,15 +936,12 @@ window.addEventListener('keydown', (e) => {
   else if (k === 'escape') {
     if (state.tour !== null) endTour();
     else if (lasso || state.measure) cancelGesture();
+    else if (state.locate) clearLocate();
     else setMode('nav');
   }
 });
 document.querySelectorAll('#modes button').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
-document.querySelectorAll('#layouts button').forEach((b) => b.addEventListener('click', () => {
-  state.layout = b.dataset.layout;
-  applyLayout();
-  setView('iso');
-}));
+document.querySelectorAll('#layouts button').forEach((b) => b.addEventListener('click', () => setLayout(b.dataset.layout)));
 document.querySelectorAll('#cams button').forEach((b) => b.addEventListener('click', () => setView(b.dataset.cam)));
 
 // ---------- drafts, screenshots ----------
@@ -895,7 +949,7 @@ function snapshot(path, key, withOverlay) {
   // Show only this comment's marker, labelled "this", so the image can't be confused with thread numbers.
   const others = [];
   scene.traverse((o) => {
-    if ((o.userData.marker || o.parent === measureGroup || o.parent === liveMeasure) && o.userData.key !== key && o.visible) {
+    if ((o.userData.marker || o.parent === measureGroup || o.parent === liveMeasure || o.parent === locGroup) && o.userData.key !== key && o.visible) {
       o.visible = false;
       others.push(o);
     }
@@ -1011,7 +1065,7 @@ function renderComments() {
         <button data-act="status">${status === 'resolved' ? 'Reopen' : 'Resolve'}</button>
       </div>
     </div>`;
-  }).join('') || (state.threads.length || state.drafts.length ? '' : '<div class="muted small">No comments yet. Pin or circle something on the model.</div>');
+  }).join('') || (state.threads.length || state.drafts.length ? '' : '<div class="muted small empty">No comments yet. Press <kbd>1</kbd> to pin or <kbd>2</kbd> to circle, then click the model.</div>');
   threads.querySelectorAll('.card').forEach((card) => {
     const t = state.threads.find((x) => x.id === Number(card.dataset.id));
     const r = () => (state.replies[t.id] ||= {});
@@ -1025,6 +1079,10 @@ function renderComments() {
     });
   });
   if (state.focus) document.querySelector(`.card[data-key="${state.focus}"]`)?.classList.add('focus');
+  const open = state.threads.filter((t) => t.status === 'open').length;
+  const resolved = state.threads.length - open;
+  $('comments-sum').textContent = [state.drafts.length && plural(state.drafts.length, 'draft'), open && `${open} open`,
+    resolved && `${resolved} resolved`].filter(Boolean).join(' · ');
   updateSend();
 }
 
@@ -1067,31 +1125,254 @@ $('send').addEventListener('click', async () => {
   }
 });
 
-// ---------- sidebar: header, parts, report ----------
+// ---------- sidebar: header, sections, parts, report ----------
+// Preferences live in a cookie because cookies ignore the port, and each project's review server has its own port.
+const prefs = (() => {
+  try { return JSON.parse(decodeURIComponent(document.cookie.match(/(?:^|; )cad-review=([^;]*)/)?.[1] || '{}')); } catch { return {}; }
+})();
+function savePrefs() {
+  document.cookie = `cad-review=${encodeURIComponent(JSON.stringify(prefs))}; max-age=31536000; path=/; SameSite=Lax`;
+}
+prefs.sections ||= { parts: true, report: true, features: false };
+document.querySelectorAll('.sec:not(.fixed)').forEach((sec) => {
+  const name = sec.dataset.sec;
+  sec.classList.toggle('open', !!prefs.sections[name]);
+  sec.querySelector('.sec-toggle').addEventListener('click', () => {
+    prefs.sections[name] = sec.classList.toggle('open');
+    savePrefs();
+  });
+});
+
+const hex = (c) => `#${c.toString(16).padStart(6, '0')}`;
+// Check messages written before proper units, and spec lines from models, may spell units out in ASCII.
+const units = (t) => esc(t).replace(/\bmm\^2\b/g, 'mm²').replace(/\bmm\^3\b/g, 'mm³').replace(/\bcm\^3\b/g, 'cm³')
+  .replace(/(\d)\s?deg\b/g, '$1°').replace(/(\d) x (?=\d)/g, '$1 × ');
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+
+function builtText(v) {
+  const d = new Date(String(v.built_at).replace(' ', 'T'));
+  const when = Number.isNaN(d.getTime()) ? v.built_at
+    : d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return [`Built ${when}`, v.commit || 'no commit', v.dirty && 'uncommitted changes'].filter(Boolean).join(' · ');
+}
+
 function renderHeader() {
   const v = state.view;
   $('project').textContent = state.project || '';
   document.title = `${state.project} · CAD Review`;
   $('badge').textContent = v?.status || 'not built';
   $('badge').className = `badge ${v?.status || ''}`;
-  $('buildinfo').textContent = v ? `built ${v.built_at} · ${v.commit || 'no commit'}${v.dirty ? ' (uncommitted changes)' : ''}` : 'Run `uv run cad build` first.';
-  $('parts').innerHTML = Object.values(state.parts).filter((p) => p.frame === 'part' || !state.parts[p.name]).map((p) => {
-    const dims = v.parts[p.name]?.bbox;
-    return `<li><input type="checkbox" data-key="${esc(p.key)}" ${p.visible ? 'checked' : ''}>
-      <span class="swatch" style="background:#${p.color.toString(16).padStart(6, '0')}"></span>${esc(p.name)}
+  $('buildinfo').textContent = v ? builtText(v) : 'Run `uv run cad build` first.';
+  $('buildinfo').title = v ? `built ${v.built_at}` : '';
+  renderParts();
+  renderReport();
+  renderFeatures();
+}
+
+function partList() { return Object.values(state.parts).filter((p) => p.frame === 'part' || !state.parts[p.name]); }
+function showParts(pred) {
+  for (const p of Object.values(state.parts)) p.visible = pred(p.name);
+  applyLayout();
+  renderParts();
+}
+function renderParts() {
+  const list = partList();
+  const hidden = list.filter((p) => !p.visible).length;
+  $('parts-sum').textContent = hidden ? `${list.length} · ${hidden} hidden` : `${list.length}`;
+  $('parts-all').hidden = !hidden;
+  $('parts').innerHTML = list.map((p) => {
+    const dims = state.view?.parts?.[p.name]?.bbox;
+    return `<li class="${p.visible ? '' : 'off'}">
+      <input type="checkbox" data-name="${esc(p.name)}" ${p.visible ? 'checked' : ''} title="Show or hide">
+      <span class="swatch" style="background:${hex(p.color)}"></span>
+      <button class="part-name" data-name="${esc(p.name)}" title="Show only this part">${esc(p.name)}</button>
       <span class="dims">${dims ? dims.map((x) => x.toFixed(1)).join(' × ') + ' mm' : ''}</span></li>`;
   }).join('');
   $('parts').querySelectorAll('input').forEach((cb) => cb.addEventListener('change', () => {
-    for (const p of Object.values(state.parts)) if (p.name === state.parts[cb.dataset.key].name) p.visible = cb.checked;
-    applyLayout();
+    const vis = Object.fromEntries(partList().map((p) => [p.name, p.visible]));
+    vis[cb.dataset.name] = cb.checked;
+    showParts((n) => vis[n]);
   }));
-  const items = [];
-  for (const [name, r] of Object.entries(v?.report || {})) {
-    for (const f of r.findings) items.push(`<li><span class="st ${f.status}">${f.status}</span>${esc(name)} · ${esc(f.check)}: ${esc(f.detail)}</li>`);
+  $('parts').querySelectorAll('.part-name').forEach((b) => b.addEventListener('click', () => {
+    const shown = partList().filter((p) => p.visible);
+    const solo = shown.length === 1 && shown[0].name === b.dataset.name;
+    showParts((n) => solo || n === b.dataset.name);
+    setView('fit');
+  }));
+}
+$('parts-all').addEventListener('click', () => { showParts(() => true); setView('fit'); });
+
+// ---------- report ----------
+const ICON = { PASS: '✓', WARN: '!', FAIL: '✕' };
+const ITEMS_SHOWN = 4;
+let reportLocs = [];
+function reportData(v) {
+  const r = v?.report || {};
+  if (r.parts) return r;
+  return { parts: r, assembly: [], spec: v?.spec || [], slice: null }; // builds from before the structured report
+}
+// Older builds put the locations into the detail text, separated by semicolons.
+function splitDetail(f) {
+  if (f.items?.length || !f.detail.includes('; ')) return { detail: f.detail, items: f.items || [] };
+  const i = f.detail.indexOf(': ');
+  const head = i > 0 ? f.detail.slice(0, i) : '';
+  const rest = i > 0 ? f.detail.slice(i + 2) : f.detail;
+  return { detail: head, items: rest.split(/;\s+/).map((text) => ({ text })) };
+}
+function itemRows(items, loc) {
+  return items.map((it, j) => {
+    const at = it.at ? `<span class="i-at">${it.at.map((c) => c.toFixed(1)).join(', ')}</span>` : '';
+    const idx = it.at ? reportLocs.push({ ...loc, at: it.at }) - 1 : -1;
+    return `<li class="${j >= ITEMS_SHOWN ? 'extra' : ''}${idx >= 0 ? ' loc' : ''}" ${idx >= 0 ? `data-loc="${idx}" title="Show it on the model"` : ''}>
+      <span class="i-text">${units(it.text)}${it.where ? `<span class="i-where">${units(it.where)}</span>` : ''}</span>${at}</li>`;
+  }).join('');
+}
+function moreButton(n) {
+  if (n <= ITEMS_SHOWN) return '';
+  const label = `Show ${n - ITEMS_SHOWN} more`;
+  return `<button class="more link small" data-label="${label}">${label}</button>`;
+}
+function findingBlock(f, loc) {
+  const { detail, items } = splitDetail(f);
+  const more = moreButton(items.length);
+  return `<div class="finding ${f.status}">
+    <div class="f-head"><span class="st-icon ${f.status}">${ICON[f.status]}</span><span class="f-check">${esc(cap(f.check))}</span></div>
+    ${detail ? `<div class="f-detail">${units(detail)}</div>` : ''}
+    ${items.length ? `<ul class="items">${itemRows(items, { ...loc, label: cap(f.check) })}</ul>${more}` : ''}
+  </div>`;
+}
+function swatches(names) {
+  return names.map((n) => (state.parts[n] ? `<span class="swatch" style="background:${hex(state.parts[n].color)}"></span>` : '')).join('');
+}
+function renderReport() {
+  const el = $('report');
+  const v = state.view;
+  reportLocs = [];
+  if (!v) { el.innerHTML = '<div class="muted small">No build yet.</div>'; $('report-sum').innerHTML = ''; return; }
+  const r = reportData(v);
+  const out = [];
+  const count = { FAIL: 0, WARN: 0 };
+  const tally = (st) => { if (st in count) count[st]++; };
+
+  const sl = r.slice;
+  if (sl) {
+    let body;
+    if (sl.skipped) body = '<div class="muted small">Not sliced: the printer setup has no slicer.</div>';
+    else if (!sl.ok) { tally('FAIL'); body = findingBlock({ status: 'FAIL', check: 'slicer', detail: sl.message }, {}); }
+    else {
+      const plates = sl.plates > 1 ? `<div><b>${sl.plates}</b><span>plates</span></div>` : '';
+      body = `<div class="stats"><div><b>${esc(sl.time)}</b><span>print time</span></div>
+        <div><b>${sl.filament_g.toFixed(1)} g</b><span>${esc((sl.material || 'filament').toUpperCase())}</span></div>
+        <div><b>${esc(sl.nozzle)}</b><span>nozzle</span></div>${plates}</div>`;
+    }
+    (sl.warnings || []).forEach((w) => { tally('WARN'); body += findingBlock({ status: 'WARN', check: 'slicer', detail: w }, {}); });
+    out.push(`<div class="rgroup"><h3>Slice</h3>${body}</div>`);
   }
-  for (const f of v?.spec || []) if (f.status !== 'PASS') items.push(`<li><span class="st ${f.status}">${f.status}</span>${esc(f.detail)}</li>`);
-  $('report').innerHTML = items.join('') || '<li class="muted">All checks pass.</li>';
-  renderFeatures();
+
+  if (r.spec?.length) {
+    const pass = r.spec.filter((f) => f.status === 'PASS').length;
+    r.spec.forEach((f) => tally(f.status));
+    const rows = r.spec.map((f) => {
+      const m = f.detail.match(/^(R\d+[a-z]?)\b[:.]?\s*([\s\S]*)$/);
+      const lines = (m ? m[2] : f.detail).split(/;\s+/).map((t) => `<div>${units(t)}</div>`).join('');
+      return `<li class="${f.status}"><span class="st-icon ${f.status}">${ICON[f.status]}</span>
+        <span class="rid">${m ? esc(m[1]) : ''}</span><div class="lines">${lines}</div></li>`;
+    }).join('');
+    out.push(`<div class="rgroup"><h3>Requirements <span class="count ${pass === r.spec.length ? 'PASS' : 'FAIL'}">${pass} of ${r.spec.length} met</span></h3>
+      <ul class="spec">${rows}</ul></div>`);
+  }
+
+  const groups = new Map();
+  const passing = [];
+  for (const [name, pr] of Object.entries(r.parts || {})) {
+    const bad = (pr.findings || []).filter((f) => f.status !== 'PASS');
+    bad.forEach((f) => tally(f.status));
+    if (!bad.length) { passing.push(name); continue; }
+    // Identical parts (four copies of a button) get one entry.
+    const sig = JSON.stringify(bad.map((f) => [f.status, f.check, f.detail, (f.items || []).map((i) => i.text)]));
+    if (!groups.has(sig)) groups.set(sig, { names: [], findings: bad, status: pr.status });
+    groups.get(sig).names.push(name);
+  }
+  const partBlocks = [...groups.values()].map((g) => `<div class="rpart">
+      <div class="rpart-head">${swatches(g.names)}<b>${esc(g.names.join(', '))}</b></div>
+      ${g.findings.map((f) => findingBlock(f, { part: g.names[0] })).join('')}
+    </div>`).join('');
+  const passLine = passing.length
+    ? `<div class="passline"><span class="st-icon PASS">✓</span>${swatches(passing)}<span>${esc(passing.join(', '))} ${passing.length === 1 ? 'passes' : 'pass'} every check</span></div>` : '';
+  out.push(`<div class="rgroup"><h3>Printability</h3>${partBlocks}${passLine}</div>`);
+
+  if (r.assembly?.length) {
+    const clear = [];
+    const other = [];
+    for (const f of r.assembly) {
+      tally(f.status);
+      const it = f.items?.[0];
+      const m = !it?.parts && f.detail.match(/^(.+) \/ (.+): min gap ([\d.]+) mm$/);
+      if (f.check === 'clearance' && (it?.parts || m)) clear.push({ f, a: it?.parts?.[0] ?? m[1], b: it?.parts?.[1] ?? m[2], gap: it?.gap ?? Number(m[3]) });
+      else other.push(f);
+    }
+    clear.sort((x, y) => x.gap - y.gap);
+    const rows = clear.map((c, j) => `<li class="${c.f.status}${j >= ITEMS_SHOWN ? ' extra' : ''}">
+      <span class="st-icon ${c.f.status}">${ICON[c.f.status]}</span><span>${esc(c.a)} / ${esc(c.b)}</span>
+      <span class="gap">${c.gap < 0.0005 ? '<span class="muted">touching</span>' : `${c.gap.toFixed(3)} mm`}</span></li>`).join('');
+    const more = moreButton(clear.length);
+    out.push(`<div class="rgroup"><h3>Assembly</h3>
+      ${other.map((f) => findingBlock(f, { frame: 'assembly' })).join('')}
+      ${clear.length ? `<div class="finding PASS"><div class="f-head"><span class="f-check">Gaps between parts</span><span class="muted small">closest first</span></div>
+        <ul class="items gaps">${rows}</ul>${more}</div>` : ''}
+    </div>`);
+  }
+
+  el.innerHTML = out.join('');
+  $('report-sum').innerHTML = count.FAIL || count.WARN
+    ? ['FAIL', 'WARN'].filter((st) => count[st]).map((st) => `<span class="pill-st ${st}">${count[st]} ${st === 'FAIL' ? 'fail' : 'warn'}</span>`).join('')
+    : '<span class="pill-st PASS">all pass</span>';
+  el.querySelectorAll('.more').forEach((b) => b.addEventListener('click', () => {
+    b.textContent = b.parentElement.classList.toggle('expanded') ? 'Show fewer' : b.dataset.label;
+  }));
+  el.querySelectorAll('li.loc').forEach((li) => li.addEventListener('click', () => {
+    const i = Number(li.dataset.loc);
+    if (state.locate?.i === i) clearLocate(); else locate(i);
+  }));
+  markLocated();
+}
+
+// Fly to a place from the report and mark it until Esc or the next pick.
+function locate(i) {
+  const loc = reportLocs[i];
+  if (!loc) return;
+  let world;
+  if (loc.frame === 'assembly') {
+    setLayout('assembly');
+    world = () => (state.layout === 'assembly' ? V3(loc.at) : null);
+  } else {
+    const part = state.parts[loc.part];
+    if (!part) return;
+    if (!part.visible) {
+      const vis = Object.fromEntries(partList().map((p) => [p.name, p.visible]));
+      showParts((n) => vis[n] || n === loc.part);
+    }
+    if (!part.group.visible) setLayout('print');
+    world = () => (part.group.visible ? part.group.localToWorld(V3(loc.at)) : null);
+  }
+  state.locate = { i, world, label: loc.label };
+  rebuildMarkers();
+  markLocated();
+  const w = world();
+  if (!w) return;
+  const bbox = loc.part && state.view?.parts?.[loc.part]?.bbox;
+  const size = THREE.MathUtils.clamp(bbox ? Math.hypot(...bbox) * 0.35 : 60, 20, 120);
+  const dir = camera.position.clone().sub(controls.target).normalize();
+  flyTo(w.clone().addScaledVector(dir, size / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)))), w);
+}
+function clearLocate() {
+  state.locate = null;
+  rebuildMarkers();
+  markLocated();
+}
+function markLocated() {
+  $('report').querySelectorAll('li.loc').forEach((li) => li.classList.toggle('active', Number(li.dataset.loc) === state.locate?.i));
 }
 
 // ---------- state, persistence, polling ----------
@@ -1143,6 +1424,7 @@ async function doLoadState() {
   if (rebuilt) {
     const hadModel = state.builtAt !== null;
     state.builtAt = s.view.built_at;
+    state.locate = null;
     await loadParts(s.view);
     if (first || !hadModel) {
       if (!(first && restoreView())) setView('iso');
@@ -1232,7 +1514,7 @@ function placeFeatures() {
     dot.position.copy(V3(f.point));
     dot.renderOrder = 9;
     part.group.add(dot);
-    addLabel(f.name, `feature${state.tour === i ? ' active' : ''}`, () => featureWorld(f), () => showFeature(i), `f${i}`);
+    addLabel(f.name, `feature${state.tour === i ? ' active' : ''}`, () => featureWorld(f), () => showFeature(i), `f${i}`, { feature: true, dot });
   });
 }
 function renderFeatures() {
@@ -1278,7 +1560,6 @@ function tourStep(d) {
 function renderTour() {
   const el = $('tour');
   const f = state.tour !== null ? state.view?.features?.[state.tour] : null;
-  $('hint').hidden = !!f;
   if (!f) { el.hidden = true; return; }
   const n = state.view.features.length;
   el.hidden = false;
@@ -1293,6 +1574,19 @@ function renderTour() {
   $('tour-next').addEventListener('click', () => tourStep(1));
 }
 $('tour-start').addEventListener('click', startTour);
+
+// ---------- help ----------
+function openHelp() { $('help').hidden = false; $('help-ok').focus(); }
+function closeHelp() {
+  $('help').hidden = true;
+  prefs.helpSeen = true;
+  savePrefs();
+}
+$('help-btn').addEventListener('click', openHelp);
+$('help-close').addEventListener('click', closeHelp);
+$('help-ok').addEventListener('click', closeHelp);
+$('help').addEventListener('click', (e) => { if (e.target === $('help')) closeHelp(); });
+if (!prefs.helpSeen) openHelp();
 $('show-features').addEventListener('change', (e) => { state.showFeatures = e.target.checked; rebuildMarkers(); });
 
 resize();

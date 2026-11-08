@@ -19,6 +19,9 @@ class Finding:
     status: str
     check: str
     detail: str
+    # The places behind the detail, for the review app and report.md: {"text", "where"?, "at"?: [x, y, z]}, with `at`
+    # in the part frame (the assembly frame for assembly findings).
+    items: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -44,8 +47,8 @@ class PartReport:
     def status(self) -> str:
         return max((f.status for f in self.findings), key=_RANK.__getitem__, default=PASS)
 
-    def add(self, status: str, check: str, detail: str) -> None:
-        self.findings.append(Finding(status, check, detail))
+    def add(self, status: str, check: str, detail: str, items: list[dict] | None = None) -> None:
+        self.findings.append(Finding(status, check, detail, items or []))
 
 
 def _groups(mesh: trimesh.Trimesh, face_ids: np.ndarray) -> list[np.ndarray]:
@@ -114,7 +117,15 @@ def fits(size, volume) -> bool:
 
 
 def _dims(v) -> str:
-    return " x ".join(f"{x:g}" for x in v)
+    return " × ".join(f"{x:g}" for x in v)
+
+
+def _at(c) -> list[float]:
+    return [round(float(x), 1) for x in c]
+
+
+def _count(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
 
 
 def _volume_check(size, s: Settings) -> tuple[str, str]:
@@ -125,13 +136,13 @@ def _volume_check(size, s: Settings) -> tuple[str, str]:
     if fits(sz, shared):
         return PASS, f"{_dims(sz)} fits the region every nozzle reaches ({_dims(shared)})"
     if fits(rotated, shared):
-        return WARN, (f"{_dims(sz)} only fits every nozzle's region ({_dims(shared)}) rotated 90 deg about Z; "
-                      "rotate it in the model so either nozzle can print it")
+        return WARN, (f"{_dims(sz)} only fits every nozzle's region ({_dims(shared)}) rotated 90° about Z. "
+                      "Rotate it in the model so either nozzle can print it")
     if able:
         names = ", ".join(f"{z.name}, {z.drive}" for z in able)
-        return WARN, (f"{_dims(sz)} only fits the {names} nozzle ({_dims(able[0].size)}); "
-                      f"single-material only, and the filament must be loaded on that nozzle")
-    return FAIL, f"{_dims(sz)} exceeds every nozzle ({'; '.join(f'{z.name} {_dims(z.size)}' for z in s.nozzles)})"
+        return WARN, (f"{_dims(sz)} only fits the {names} nozzle ({_dims(able[0].size)}). "
+                      f"Single material only, with the filament loaded on that nozzle")
+    return FAIL, f"{_dims(sz)} exceeds every nozzle ({', '.join(f'{z.name} {_dims(z.size)}' for z in s.nozzles)})"
 
 
 def check_part(name: str, mesh: trimesh.Trimesh, s: Settings) -> PartReport:
@@ -169,9 +180,9 @@ def check_part(name: str, mesh: trimesh.Trimesh, s: Settings) -> PartReport:
     if abs(lo[2]) > 1e-3:
         r.add(FAIL, "on bed", f"lowest point is z={lo[2]:.3f}, expected 0")
     elif contact < d["min_bed_contact"]:
-        r.add(WARN, "bed contact", f"only {contact:.1f} mm^2 flat on the bed; consider a brim or reorienting")
+        r.add(WARN, "bed contact", f"only {contact:.1f} mm² flat on the bed. Consider a brim or reorienting")
     else:
-        r.add(PASS, "bed contact", f"{contact:.0f} mm^2")
+        r.add(PASS, "bed contact", f"{contact:.0f} mm²")
 
     limit = np.sin(np.radians(90 - d["overhang_angle"]))
     downward = (n[:, 2] < -limit - 1e-3) & ~on_bed  # tolerance lets exact 45 deg chamfers pass
@@ -182,26 +193,32 @@ def check_part(name: str, mesh: trimesh.Trimesh, s: Settings) -> PartReport:
     oh_regions = [x for x in map(lambda g: _region(mesh, g), _groups(mesh, overhangs)) if x.area > 1.0]
     oh_regions.sort(key=lambda x: -x.area)
     if oh_regions:
-        desc = "; ".join(f"{x.area:.0f} mm^2 at z={x.z_min:.1f}-{x.z_max:.1f} near {x.center}" for x in oh_regions[:4])
-        r.add(WARN, "overhangs", f"{len(oh_regions)} region(s) steeper than {d['overhang_angle']} deg: {desc}")
+        items = [{"text": f"{x.area:.0f} mm² at z {x.z_min:.1f}–{x.z_max:.1f}", "at": _at(x.center)} for x in oh_regions]
+        r.add(WARN, "overhangs", f"{_count(len(oh_regions), 'region')} steeper than {d['overhang_angle']}°", items)
     else:
-        r.add(PASS, "overhangs", f"none steeper than {d['overhang_angle']} deg")
+        r.add(PASS, "overhangs", f"none steeper than {d['overhang_angle']}°")
 
     ceilings = [x for x in map(lambda g: _ceiling(mesh, g), _groups(mesh, bridges)) if x.area > 1.0]
-    bad = []
+    bad, kinds = [], {}
     for x in ceilings:
-        where = f"{x.area:.0f} mm^2 at z={x.z_min:.1f} near {x.center}"
+        where = f"{x.area:.0f} mm² at z {x.z_min:.1f}"
         if x.kind == "floating":
-            bad.append(f"floating ceiling with no wall below ({where}), needs support")
+            text = "floating with no wall below, needs support"
         elif x.kind == "cantilever" and x.reach > d["max_cantilever"]:
-            bad.append(f"cantilevered ceiling reaching {x.reach:.1f} mm past its support ({where})")
+            text = f"cantilever reaching {x.reach:.1f} mm past its support"
         elif x.kind == "bridge" and 2 * x.reach > d["max_bridge"]:
-            bad.append(f"bridge spanning ~{2 * x.reach:.0f} mm ({where})")
+            text = f"bridge spanning ~{2 * x.reach:.0f} mm"
+        else:
+            continue
+        bad.append({"text": text, "where": where, "at": _at(x.center)})
+        kinds[x.kind] = kinds.get(x.kind, 0) + 1
     if bad:
-        r.add(WARN, "bridges", f"{len(bad)} flat ceiling(s) need attention: " + "; ".join(bad[:4]))
+        names = {"floating": "floating", "cantilever": "cantilevered", "bridge": "long bridges"}
+        split = ", ".join(f"{n} {names[k]}" for k, n in kinds.items())
+        r.add(WARN, "bridges", f"{_count(len(bad), 'flat ceiling')} need attention ({split})", bad)
     elif ceilings:
         widest = max((2 * x.reach if x.kind == "bridge" else x.reach) for x in ceilings)
-        r.add(PASS, "bridges", f"{len(ceilings)} flat ceiling(s), longest unsupported ~{widest:.1f} mm")
+        r.add(PASS, "bridges", f"{_count(len(ceilings), 'flat ceiling')}, longest unsupported ~{widest:.1f} mm")
     else:
         r.add(PASS, "bridges", "no flat ceilings")
 
@@ -214,14 +231,13 @@ def check_part(name: str, mesh: trimesh.Trimesh, s: Settings) -> PartReport:
         thin = t < d["min_wall"]
         r.thin_points = pts[thin]
         frac = thin.mean() * 100
-        where = ""
+        items = []
         if thin.any():
-            c = tuple(round(float(x), 1) for x in pts[thin][np.argmin(t[thin])])
-            where = f", thinnest {tmin:.2f} mm near {c}"
+            items = [{"text": f"thinnest {tmin:.2f} mm", "at": _at(pts[thin][np.argmin(t[thin])])}]
         if tmin < d["min_wall_hard"] and frac > 0.2:
-            r.add(FAIL, "wall thickness", f"{frac:.1f}% of samples below {d['min_wall']} mm{where}")
+            r.add(FAIL, "wall thickness", f"{frac:.1f}% of samples below {d['min_wall']} mm", items)
         elif frac > 0.2:
-            r.add(WARN, "wall thickness", f"{frac:.1f}% of samples below {d['min_wall']} mm{where}")
+            r.add(WARN, "wall thickness", f"{frac:.1f}% of samples below {d['min_wall']} mm", items)
         else:
             r.add(PASS, "wall thickness", f"min ~{p1:.2f} mm (1st percentile)")
     return r
@@ -237,9 +253,12 @@ def check_interference(parts: dict, min_clearance: float = 0.0) -> list[Finding]
             common = pa & pb
             vol = sum(s.volume for s in common.solids()) if common is not None else 0.0
             if vol > 1e-3:
-                out.append(Finding(FAIL, "interference", f"{a} and {b} overlap by {vol:.2f} mm^3"))
+                c = common.center()
+                out.append(Finding(FAIL, "interference", f"{a} and {b} overlap by {vol:.2f} mm³",
+                                   [{"text": "overlap", "at": _at((c.X, c.Y, c.Z))}]))
             else:
                 gap = pa.distance_to(pb)
                 status = WARN if gap < min_clearance else PASS
-                out.append(Finding(status, "clearance", f"{a} / {b}: min gap {gap:.3f} mm"))
+                out.append(Finding(status, "clearance", f"{a} / {b}: min gap {gap:.3f} mm",
+                                   [{"text": f"min gap {gap:.3f} mm", "parts": [a, b], "gap": round(gap, 3)}]))
     return out

@@ -94,7 +94,9 @@ A build writes these to `out/`:
 
 ## Review app controls
 
-The mouse navigates like Bambu Studio: left-drag rotates, right- or middle-drag pans, the wheel zooms. Press 1 pin, 2 circle or 3 measure to give the left button to a tool; Space switches between navigating and the last tool, and Esc goes back to navigating. Right-drag and the wheel work in every mode. B opens the sliced project in Bambu Studio.
+The mouse navigates like Bambu Studio: left-drag rotates, right- or middle-drag pans, the wheel zooms. Press 1 pin, 2 circle or 3 measure to give the left button to a tool; Space switches between navigating and the last tool, and Esc goes back to navigating. Right-drag and the wheel work in every mode. Tab switches between the plate and the assembly, F fits the view, and B opens the sliced project in Bambu Studio. The Controls button (or `?`) lists everything.
+
+The sidebar's report shows the slice time and filament, the requirements, each part's printability findings and the gaps between assembled parts. Click a location in it to fly to that spot on the model.
 
 ## License
 

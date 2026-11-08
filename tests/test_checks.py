@@ -32,7 +32,7 @@ def test_nozzle_regions_from_profile(s):
 
 @pytest.mark.parametrize("dims, status, phrase", [
     ((200, 200, 200), checks.PASS, "every nozzle"),
-    ((250, 200, 10), checks.WARN, "rotated 90 deg"),
+    ((250, 200, 10), checks.WARN, "rotated 90°"),
     ((250, 250, 10), checks.WARN, "left (main)"),
     ((20, 20, 258), checks.WARN, "left (main)"),
     ((300, 20, 10), checks.FAIL, "exceeds"),
@@ -49,6 +49,8 @@ def test_overhang_detected(s):
     st, rep = statuses(Cone(2, 10, 4), s)
     assert st["overhangs"] == checks.WARN
     assert len(rep.overhang_faces) > 0
+    f = next(f for f in rep.findings if f.check == "overhangs")
+    assert "°" in f.detail and f.items and len(f.items[0]["at"]) == 3 and "mm²" in f.items[0]["text"]
 
 
 def test_floating_ceiling_warns(s):
