@@ -156,8 +156,8 @@ uv run pytest -q
 
 ### Review app
 
-- **Navigation is on the right mouse button:** drag pans, Ctrl+drag or middle-drag rotates, the wheel zooms. Shift+right-drag isn't used because Firefox-based browsers always open their context menu on Shift+right-click.
-- **The left button runs the current tool:** 1 pin, 2 circle, 3 measure. Esc cancels.
+- **Navigation matches Bambu Studio:** left-drag rotates (0.8° per pixel), right- or middle-drag pans, the wheel zooms toward the view center (10% per notch).
+- **Tools take over the left button:** 1 pin, 2 circle, 3 measure. Space switches between Navigate and the last tool. Esc cancels a gesture, then returns to Navigate. Right-drag, middle-drag and the wheel work in every mode, and Ctrl+right-drag rotates. A measurement in progress survives a trip to Navigate and back.
 - **Open in Bambu Studio** (under the build info, or B) opens the latest sliced project, like `cad open`.
 - **Measure:**
   - Snaps to exact B-rep vertices, circle centers, edge midpoints and edges. Ctrl+click places a point freely.
